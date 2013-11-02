@@ -1,0 +1,56 @@
+SpringLobbyInterface.pm:
+=======================
+0.5: first public version (beta)
+0.5a: fix startrect values in startscripts
+0.5b: workaround for tabulations in chat messages (some lobby clients don't respect the lobby protocol, and the lobby server doesn't enforce it)
+0.6: update startscript format ("Gametype" is now set to Mod name instead of archive name, and "MyPlayerName" and "IsHost" tags are now generated)
+0.7: use mod specific sides instead of hard-coded ARM/CORE in startscript
+0.7a: do not cancel start script generation when a player has an invalid side, instead write the nearest side available in current mod
+0.7b: use mod specific sides instead of hard-coded ARM/CORE in startscript for bots too
+0.7c: log a warning when a command cannot be sent to lobby server
+      add execution time statistics in debug messages for handlers and callbacks
+0.7d: only log handler and callback execution times >= 1 second, and adjust log level according to execution time
+0.7e: restrict statistics log levels to DEBUG and INFO
+0.8: experimental Windows support
+     refactored command parsing (workaround for TASServer bugs in LAN mode)
+0.8a: store all start boxes in start scripts, even the unused ones (they can be used in game for King Of The Hill mode for example)
+0.8b: be more tolerent on start script tags case (Pytasserver requirement)
+0.9: AutoHost removed from startscript (auto-force from SPADS should be much less needed)
+     new AI syntax in startscript
+0.9a: added AccountId support (printed in startscript)
+0.9b: account ID indexed list of players is now available (usefull to check if a given account is online)
+      AutoHostCountryCode and AutoHostRank tags added in startscript
+      IPs of players joining the battle are now available if lobby server supports JOINBATTLEREQUEST command
+0.9c: workaround for bugged random start positions in Spring
+      AutoHost account ID added in start script
+0.10: start script passwords support added (spoof protection)
+0.10a: fix for spring-dedicated now using HostIP startscript parameter for binding server socket
+0.10b: fix for spring-dedicated now using HostIP startscript parameter for binding server socket (now for real :) )
+0.11: added player IDs remapping functionnality to workaround lobby limitation to 16 IDs
+0.12: added support for mapoptions
+0.12a: added support for SAYBATTLEPRIVATE / SAYBATTLEPRIVATEEX commands (uberserver only)
+0.12b: added support for AI version data in ADDBOT command
+0.12c: log error details when messages can't be sent to lobby server
+0.12d: added support for autohost in headless mode
+       changed default lobby server host to 'lobby.springrts.com'
+       reset map options on map change
+0.12e: remapped IDs and team IDs are now available from outside the module
+0.12f: allow tab characters in SAYPRIVATE commands (used in game data reports)
+0.13: added "pre-callback" functionnality (executed before the module internal handlers)
+      int values sent by lobby server are now checked in the interface module
+0.13a: added CHANNEL command unmarshalling information (used by IRC bridge)
+0.14: multiple callbacks can now be added for each command, with optional priority parameter
+      global pre-callbacks can be added to handle all commands in same function
+0.15: added support for REMOVESCRIPTTAGS command
+      added support for non-standard 'Skill' field in startscript (generated from "game/players/<lowerCasePlayerName>/skill" start script tag)
+      simplified the "reset map options on map change" workaround
+0.15a: removed the "reset map options on map change" workaround (added in v0.12d) now that uberserver supports the REMOVESCRIPTTAGS command
+0.16: added support for non-standard 'SkillUncertainty' field in startscript (generated from "game/players/<lowerCasePlayerName>/skilluncertainty" start script tag)
+0.17: added support for multi-engine lobby protocol extension (OPENBATTLEEX,BATTLEOPENEDEX)
+      small change in ids/teams remapping algorithm to reduce remapping and order spectators by skill
+      removed workaround for bugged random start positions in Spring (was introduced in 0.9c, should be fixed now)
+0.17a: added missing command hook on OPENBATTLEEX (this caused rehost loop in SPADS when using multi-engine protocol extension with a passworded battle)
+0.18: timestamps for latest commands sent and received are now stored in the module
+0.19: renamed from PerlLobbyInterface to SpringLobbyInterface
+      socket is now used in blocking mode (should fix a rare bug when a lot of data is sent by the bot at the same time), reads are still not blocking thanks to select+sysread
+      use LineFeed character specificaly to split commands instead of depending on current system NewLine convention
