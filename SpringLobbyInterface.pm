@@ -30,7 +30,7 @@ use SimpleLog;
 
 # Internal data ###############################################################
 
-my $moduleVersion='0.19';
+my $moduleVersion='0.20';
 
 my %sentenceStartPosClient = (
   REQUESTUPDATEFILE => 1,
@@ -691,7 +691,7 @@ sub generateStartData {
   push(@startData,"");
   foreach my $tag (keys %{$p_additionalData}) {
     my $realTag=$tag;
-    if($tag =~ /^game\/([^\/]*)$/i) {
+    if($tag =~ /^game\/([^\/]+)$/i) {
       $realTag=$1;
     }else{
       next;
@@ -735,9 +735,15 @@ sub generateStartData {
     push(@startData,"    Spectator=".(1 - $p_battleStatus->{mode}).";");
     push(@startData,"    Team=$team;") if($p_battleStatus->{mode});
     if(exists $self->{users}->{$user}) {
+      my $playerAccountId=$self->{users}->{$user}->{accountId};
       push(@startData,"    CountryCode=$self->{users}->{$user}->{country};");
       push(@startData,"    Rank=$self->{users}->{$user}->{status}->{rank};");
-      push(@startData,"    AccountId=$self->{users}->{$user}->{accountId};");
+      push(@startData,"    AccountId=$playerAccountId;");
+      if(exists $p_additionalData->{playerData} && exists $p_additionalData->{playerData}->{$playerAccountId}) {
+        foreach my $tag (keys %{$p_additionalData->{playerData}->{$playerAccountId}}) {
+          push(@startData,"    $tag=$p_additionalData->{playerData}->{$playerAccountId}->{$tag};")
+        }
+      }
     }
     push(@startData,'    Skill='.$battleData{scriptTags}->{'game/players/'.lc($user).'/skill'}.';') if(exists $battleData{scriptTags}->{'game/players/'.lc($user).'/skill'});
     push(@startData,'    SkillUncertainty='.$battleData{scriptTags}->{'game/players/'.lc($user).'/skilluncertainty'}.';') if(exists $battleData{scriptTags}->{'game/players/'.lc($user).'/skilluncertainty'});
@@ -799,12 +805,21 @@ sub generateStartData {
   push(@startData,"  {");
   foreach my $tag (keys %{$battleData{scriptTags}}) {
     my $realTag=$tag;
-    if($tag =~ /^game\/modoptions\/(.*)$/i) {
+    if($tag =~ /^game\/modoptions\/(.+)$/i) {
       $realTag=$1;
     }else{
       next;
     }
     push(@startData,"    $realTag=$battleData{scriptTags}->{$tag};");
+  }
+  foreach my $tag (keys %{$p_additionalData}) {
+    my $realTag=$tag;
+    if($tag =~ /^game\/modoptions\/(.+)$/i) {
+      $realTag=$1;
+    }else{
+      next;
+    }
+    push(@startData,"    $realTag=$p_additionalData->{$tag};");
   }
   push(@startData,"  }");
 
@@ -812,12 +827,21 @@ sub generateStartData {
   push(@startData,"  {");
   foreach my $tag (keys %{$battleData{scriptTags}}) {
     my $realTag=$tag;
-    if($tag =~ /^game\/mapoptions\/(.*)$/i) {
+    if($tag =~ /^game\/mapoptions\/(.+)$/i) {
       $realTag=$1;
     }else{
       next;
     }
     push(@startData,"    $realTag=$battleData{scriptTags}->{$tag};");
+  }
+  foreach my $tag (keys %{$p_additionalData}) {
+    my $realTag=$tag;
+    if($tag =~ /^game\/mapoptions\/(.+)$/i) {
+      $realTag=$1;
+    }else{
+      next;
+    }
+    push(@startData,"    $realTag=$p_additionalData->{$tag};");
   }
   push(@startData,"  }");
 

@@ -54,3 +54,5 @@ SpringLobbyInterface.pm:
 0.19: renamed from PerlLobbyInterface to SpringLobbyInterface
       socket is now used in blocking mode (should fix a rare bug when a lot of data is sent by the bot at the same time), reads are still not blocking thanks to select+sysread
       use LineFeed character specificaly to split commands instead of depending on current system NewLine convention
+0.20: extend the startscript additional data functionality to modoptions, mapoptions, and player sections
+      prevent empty tag names in startscript
