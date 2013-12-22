@@ -56,3 +56,4 @@ SpringLobbyInterface.pm:
       use LineFeed character specificaly to split commands instead of depending on current system NewLine convention
 0.20: extend the startscript additional data functionality to modoptions, mapoptions, and player sections
       prevent empty tag names in startscript
+0.21: add support for "cl" compatibility flag

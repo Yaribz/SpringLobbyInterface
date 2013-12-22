@@ -30,7 +30,7 @@ use SimpleLog;
 
 # Internal data ###############################################################
 
-my $moduleVersion='0.20';
+my $moduleVersion='0.21';
 
 my %sentenceStartPosClient = (
   REQUESTUPDATEFILE => 1,
@@ -115,7 +115,7 @@ my %commandHandlers = (
   FORCELEAVECHANNEL => \&leaveChannelHandler,
   OPENBATTLE => \&openBattleHandler,
   BATTLEOPENED => \&battleOpenedHandler,
-  BATTLEOPENEDEX => \&battleOpenedExHandler,
+  BATTLEOPENEDEX => \&battleOpenedHandler,
   BATTLECLOSED => \&battleClosedHandler,
   JOINBATTLE => \&joinBattleHandler,
   JOINEDBATTLE => \&joinedBattleHandler,
@@ -1308,33 +1308,16 @@ sub leaveChannelHandler {
 }
 
 sub battleOpenedHandler {
-  my ($self,undef,$battleId,$type,$natType,$founder,$ip,$port,$maxPlayers,$passworded,$rank,$mapHash,$map,$title,$mod)=@_;
+  my ($self,undef,$battleId,$type,$natType,$founder,$ip,$port,$maxPlayers,$passworded,$rank,$mapHash,@otherParams)=@_;
   $self->checkIntParams('BATTLEOPENED',[qw/battleId type natType port maxPlayers passworded rank mapHash/],[\$battleId,\$type,\$natType,\$port,\$maxPlayers,\$passworded,\$rank,\$mapHash]);
-  my ($engineName,$engineVersion)=('spring',$self->{defaultSpringVersion});
-  ($engineName,$engineVersion)=($1,$2) if($title =~ /^Incompatible \(([^ \)]+) +([^\)]+)\)/);
-  $self->{battles}->{$battleId} = { type => $type,
-                                    natType => $natType,
-                                    founder => $founder,
-                                    ip => $ip,
-                                    port => $port,
-                                    maxPlayers => $maxPlayers,
-                                    passworded => $passworded,
-                                    rank => $rank,
-                                    mapHash => $mapHash,
-                                    engineName => $engineName,
-                                    engineVersion => $engineVersion,
-                                    map => $map,
-                                    title => $title,
-                                    mod => $mod,
-                                    userList => [$founder],
-                                    nbSpec => 0,
-                                    locked => 0};
-  return 1;
-}
-
-sub battleOpenedExHandler {
-  my ($self,undef,$battleId,$type,$natType,$founder,$ip,$port,$maxPlayers,$passworded,$rank,$mapHash,$engineName,$engineVersion,$map,$title,$mod)=@_;
-  $self->checkIntParams('BATTLEOPENED',[qw/battleId type natType port maxPlayers passworded rank mapHash/],[\$battleId,\$type,\$natType,\$port,\$maxPlayers,\$passworded,\$rank,\$mapHash]);
+  my ($engineName,$engineVersion,$map,$title,$mod);
+  if($#otherParams < 4) {
+    ($map,$title,$mod)=@otherParams;
+    ($engineName,$engineVersion)=('spring',$self->{defaultSpringVersion});
+    ($engineName,$engineVersion)=($1,$2) if($title =~ /^Incompatible \(([^ \)]+) +([^\)]+)\)/);
+  }else{
+    ($engineName,$engineVersion,$map,$title,$mod)=@otherParams;
+  }
   $self->{battles}->{$battleId} = { type => $type,
                                     natType => $natType,
                                     founder => $founder,
