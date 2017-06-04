@@ -1,7 +1,7 @@
 # Object-oriented Perl module implementing a callback-based interface to
 # communicate with SpringRTS lobby server.
 #
-# Copyright (C) 2008-2013  Yann Riou <yaribzh@gmail.com>
+# Copyright (C) 2008-2017  Yann Riou <yaribzh@gmail.com>
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -30,7 +30,7 @@ use SimpleLog;
 
 # Internal data ###############################################################
 
-my $moduleVersion='0.21';
+my $moduleVersion='0.22';
 
 my %sentenceStartPosClient = (
   REQUESTUPDATEFILE => 1,
@@ -145,10 +145,11 @@ sub new {
     serverPort => 8200,
     timeout => 30,
     simpleLog => undef,
+    inconsistencyHandler => undef,
     warnForUnhandledMessages => 1
   };
   foreach my $param (keys %params) {
-    if(grep(/^$param$/,(keys %{$p_conf}))) {
+    if(exists $p_conf->{$param}) {
       $p_conf->{$param}=$params{$param};
     }else{
       if(! (defined $p_conf->{simpleLog})) {
@@ -233,9 +234,9 @@ sub dumpState {
   $sl->log("USERS:",5);
   my %users=%{$self->{users}};
   foreach my $u (keys %users) {
-    my $userString="  $u (CPU:$users{$u}->{cpu},country:$users{$u}->{country}";
-    foreach my $status (keys %{$users{$u}->{status}}) {
-      $userString.=",$status:$users{$u}->{status}->{$status}";
+    my $userString="  $u (CPU:$users{$u}{cpu},country:$users{$u}{country}";
+    foreach my $status (keys %{$users{$u}{status}}) {
+      $userString.=",$status:$users{$u}{status}{$status}";
     }
     $sl->log($userString.")",5);
   }
@@ -251,11 +252,11 @@ sub dumpState {
     my $needComa=0;
     foreach my $k (keys %{$battles{$b}}) {
       next if($k eq "userList");
-      $bString.=("," x $needComa)."$k:$battles{$b}->{$k}";
+      $bString.=("," x $needComa)."$k:$battles{$b}{$k}";
       $needComa=1;
     }
     $bString.=",userList=";
-    my @userList=@{$battles{$b}->{userList}};
+    my @userList=@{$battles{$b}{userList}};
     for my $i (0..$#userList) {
       $bString.=" $userList[$i]";
     }
@@ -271,32 +272,32 @@ sub dumpState {
     foreach my $u (keys %{$battle{users}}) {
       $sl->log("    $u:",5);
       my $statusString="      battleStatus: ";
-      foreach my $us (keys %{$battle{users}->{$u}->{battleStatus}}) {
-        $statusString.="$us=$battle{users}->{$u}->{battleStatus}->{$us},";
+      foreach my $us (keys %{$battle{users}{$u}{battleStatus}}) {
+        $statusString.="$us=$battle{users}{$u}{battleStatus}{$us},";
       }
       $sl->log($statusString,5);
       my $colorString="      color: ";
-      foreach my $col (keys %{$battle{users}->{$u}->{color}}) {
-        $colorString.="$col=$battle{users}->{$u}->{color}->{$col},";
+      foreach my $col (keys %{$battle{users}{$u}{color}}) {
+        $colorString.="$col=$battle{users}{$u}{color}{$col},";
       }
       $sl->log($colorString,5);
-      $sl->log("      ip:$battle{users}->{$u}->{ip}",5) if(defined $battle{users}->{$u}->{ip});
-      $sl->log("      port:$battle{users}->{$u}->{port}",5) if(defined $battle{users}->{$u}->{port});
+      $sl->log("      ip:$battle{users}{$u}{ip}",5) if(defined $battle{users}{$u}{ip});
+      $sl->log("      port:$battle{users}{$u}{port}",5) if(defined $battle{users}{$u}{port});
     }
 
     $sl->log("  bots:",5);
     foreach my $b (keys %{$battle{bots}}) {
       $sl->log("    $b:",5);
-      $sl->log("      owner:$battle{bots}->{$b}->{owner}",5);
-      $sl->log("      aiDll:$battle{bots}->{$b}->{aiDll}",5);
+      $sl->log("      owner:$battle{bots}{$b}{owner}",5);
+      $sl->log("      aiDll:$battle{bots}{$b}{aiDll}",5);
       my $statusString="     battleStatus: ";
-      foreach my $bs (keys %{$battle{bots}->{$b}->{battleStatus}}) {
-        $statusString.="$bs=$battle{bots}->{$b}->{battleStatus}->{$bs},";
+      foreach my $bs (keys %{$battle{bots}{$b}{battleStatus}}) {
+        $statusString.="$bs=$battle{bots}{$b}{battleStatus}{$bs},";
       }
       $sl->log($statusString,5);
       my $colorString="      color: ";
-      foreach my $col (keys %{$battle{bots}->{$b}->{color}}) {
-        $colorString.="$col=$battle{bots}->{$b}->{color}->{$col},";
+      foreach my $col (keys %{$battle{bots}{$b}{color}}) {
+        $colorString.="$col=$battle{bots}{$b}{color}{$col},";
       }
       $sl->log($colorString,5);
     }
@@ -308,14 +309,14 @@ sub dumpState {
     $sl->log("  start rects:",5);
     foreach my $id (keys %{$battle{startRects}}) {
       my $srString="    $id: ";
-      foreach my $point (keys %{$battle{startRects}->{$id}}) {
-        $srString.="$point=$battle{startRects}->{$id}->{$point},";
+      foreach my $point (keys %{$battle{startRects}{$id}}) {
+        $srString.="$point=$battle{startRects}{$id}{$point},";
       }
       $sl->log($srString,5);
     }
     my $stString="  script tags: ";
     foreach my $tag (keys %{$battle{scriptTags}}) {
-      $stString.="$tag=$battle{scriptTags}->{$tag},";
+      $stString.="$tag=$battle{scriptTags}{$tag},";
     }
     $sl->log($stString,5);
   }
@@ -466,21 +467,21 @@ sub aindex (\@$;$) {
 
 sub storeRunningBattle {
   my $self=shift;
-  $self->{runningBattle}=dclone($self->{battles}->{$self->{battle}->{battleId}});
+  $self->{runningBattle}=dclone($self->{battles}{$self->{battle}{battleId}});
   foreach my $k (keys %{$self->{battle}}) {
-    if(ref($self->{battle}->{$k})) {
-      $self->{runningBattle}->{$k}=dclone($self->{battle}->{$k});
+    if(ref($self->{battle}{$k})) {
+      $self->{runningBattle}{$k}=dclone($self->{battle}{$k});
     }else{
-      $self->{runningBattle}->{$k}=$self->{battle}->{$k};
+      $self->{runningBattle}{$k}=$self->{battle}{$k};
     }
   }
-  if(exists $self->{runningBattle}->{users}) {
-    foreach my $user (keys %{$self->{runningBattle}->{users}}) {
-      foreach my $k (keys %{$self->{users}->{$user}}) {
-        if(ref($self->{users}->{$user}->{$k})) {
-          $self->{runningBattle}->{users}->{$user}->{$k}=dclone($self->{users}->{$user}->{$k});
+  if(exists $self->{runningBattle}{users}) {
+    foreach my $user (keys %{$self->{runningBattle}{users}}) {
+      foreach my $k (keys %{$self->{users}{$user}}) {
+        if(ref($self->{users}{$user}{$k})) {
+          $self->{runningBattle}{users}{$user}{$k}=dclone($self->{users}{$user}{$k});
         }else{
-          $self->{runningBattle}->{users}->{$user}->{$k}=$self->{users}->{$user}->{$k};
+          $self->{runningBattle}{users}{$user}{$k}=$self->{users}{$user}{$k};
         }
       }
     }
@@ -490,32 +491,32 @@ sub storeRunningBattle {
 sub remapRunningBattleIds {
   my $self=shift;
   my $nextRemappedId=0;
-  my $p_bUsers=$self->{runningBattle}->{users};
-  my $p_bBots=$self->{runningBattle}->{bots};
+  my $p_bUsers=$self->{runningBattle}{users};
+  my $p_bBots=$self->{runningBattle}{bots};
   foreach my $player (keys %{$p_bUsers}) {
-    if(defined $p_bUsers->{$player}->{battleStatus} && $p_bUsers->{$player}->{battleStatus}->{mode}) {
-      $nextRemappedId=$p_bUsers->{$player}->{battleStatus}->{id}+1 if($p_bUsers->{$player}->{battleStatus}->{id} >= $nextRemappedId);
+    if(defined $p_bUsers->{$player}{battleStatus} && $p_bUsers->{$player}{battleStatus}{mode}) {
+      $nextRemappedId=$p_bUsers->{$player}{battleStatus}{id}+1 if($p_bUsers->{$player}{battleStatus}{id} >= $nextRemappedId);
     }
   }
   foreach my $bot (keys %{$p_bBots}) {
-    $nextRemappedId=$p_bBots->{$bot}->{battleStatus}->{id}+1 if($p_bBots->{$bot}->{battleStatus}->{id} >= $nextRemappedId);
+    $nextRemappedId=$p_bBots->{$bot}{battleStatus}{id}+1 if($p_bBots->{$bot}{battleStatus}{id} >= $nextRemappedId);
   }
   my %usedIds;
   foreach my $player (keys %{$p_bUsers}) {
-    if(defined $p_bUsers->{$player}->{battleStatus} && $p_bUsers->{$player}->{battleStatus}->{mode}) {
-      my $playerId=$p_bUsers->{$player}->{battleStatus}->{id};
+    if(defined $p_bUsers->{$player}{battleStatus} && $p_bUsers->{$player}{battleStatus}{mode}) {
+      my $playerId=$p_bUsers->{$player}{battleStatus}{id};
       if(exists $usedIds{$playerId}) {
         $playerId=$nextRemappedId++;
-        $p_bUsers->{$player}->{battleStatus}->{id}=$playerId;
+        $p_bUsers->{$player}{battleStatus}{id}=$playerId;
       }
       $usedIds{$playerId}=1;
     }
   }
   foreach my $bot (keys %{$p_bBots}) {
-    my $botId=$p_bBots->{$bot}->{battleStatus}->{id};
+    my $botId=$p_bBots->{$bot}{battleStatus}{id};
     if(exists $usedIds{$botId}) {
       $botId=$nextRemappedId++;
-      $p_bBots->{$bot}->{battleStatus}->{id}=$botId;
+      $p_bBots->{$bot}{battleStatus}{id}=$botId;
     }
     $usedIds{$botId}=1;
   }
@@ -530,16 +531,16 @@ sub getSkillValue {
 sub specSort {
   my ($p_bData,$a,$b)=@_;
   my ($skillA,$skillB,$skillSigmaA,$skillSigmaB)=(0,0,10,10);
-  if(exists $p_bData->{scriptTags}->{'game/players/'.lc($a).'/skill'}) {
-    $skillA=getSkillValue($p_bData->{scriptTags}->{'game/players/'.lc($a).'/skill'});
-    if(exists $p_bData->{scriptTags}->{'game/players/'.lc($a).'/skilluncertainty'}) {
-      $skillSigmaA=$p_bData->{scriptTags}->{'game/players/'.lc($a).'/skilluncertainty'};
+  if(exists $p_bData->{scriptTags}{'game/players/'.lc($a).'/skill'}) {
+    $skillA=getSkillValue($p_bData->{scriptTags}{'game/players/'.lc($a).'/skill'});
+    if(exists $p_bData->{scriptTags}{'game/players/'.lc($a).'/skilluncertainty'}) {
+      $skillSigmaA=$p_bData->{scriptTags}{'game/players/'.lc($a).'/skilluncertainty'};
     }
   }
-  if(exists $p_bData->{scriptTags}->{'game/players/'.lc($b).'/skill'}) {
-    $skillB=getSkillValue($p_bData->{scriptTags}->{'game/players/'.lc($b).'/skill'});
-    if(exists $p_bData->{scriptTags}->{'game/players/'.lc($b).'/skilluncertainty'}) {
-      $skillSigmaB=$p_bData->{scriptTags}->{'game/players/'.lc($b).'/skilluncertainty'};
+  if(exists $p_bData->{scriptTags}{'game/players/'.lc($b).'/skill'}) {
+    $skillB=getSkillValue($p_bData->{scriptTags}{'game/players/'.lc($b).'/skill'});
+    if(exists $p_bData->{scriptTags}{'game/players/'.lc($b).'/skilluncertainty'}) {
+      $skillSigmaB=$p_bData->{scriptTags}{'game/players/'.lc($b).'/skilluncertainty'};
     }
   }
   return $skillB <=> $skillA if($skillA != $skillB);
@@ -555,7 +556,7 @@ sub generateStartData {
   $p_additionalData={} unless(defined $p_additionalData);
   if(! (defined $p_battleData)) {
     if(! %{$self->{runningBattle}}) {
-      if(exists $self->{battle}->{battleId}) {
+      if(exists $self->{battle}{battleId}) {
         $self->storeRunningBattle();
       }else{
         $sl->log("Unable to generate start data (no battle data)",1);
@@ -585,20 +586,20 @@ sub generateStartData {
 
   my (@playerList,@specList);
   foreach my $user (@{$battleData{userList}}) {
-    if(defined $battleData{users}->{$user}->{battleStatus} && $battleData{users}->{$user}->{battleStatus}->{mode}) {
+    if(defined $battleData{users}{$user}{battleStatus} && $battleData{users}{$user}{battleStatus}{mode}) {
       push(@playerList,$user);
     }else{
       push(@specList,$user);
     }
   }
-  my @orderedPlayers = sort { $battleData{users}->{$a}->{battleStatus}->{id} <=> $battleData{users}->{$b}->{battleStatus}->{id} } @playerList;
+  my @orderedPlayers = sort { $battleData{users}{$a}{battleStatus}{id} <=> $battleData{users}{$b}{battleStatus}{id} } @playerList;
   my @orderedSpecs = sort { specSort(\%battleData,$a,$b) } @specList;
   $battleData{userList}=[@orderedPlayers,@orderedSpecs];
 
   for my $userIndex (0..$#{$battleData{userList}}) {
     my $user=$battleData{userList}->[$userIndex];
     $myPlayerNum=$userIndex if($user eq $self->{login});
-    my $p_battleStatus=$battleData{users}->{$user}->{battleStatus};
+    my $p_battleStatus=$battleData{users}{$user}{battleStatus};
     if($p_battleStatus->{mode}) {
       if($p_battleStatus->{side} > $#{$p_sides}) {
         $sl->log("Side number of player \"$user\" is too big ($p_battleStatus->{side}), using max value for current MOD instead ($#{$p_sides})",2);
@@ -612,7 +613,7 @@ sub generateStartData {
         }else{
           $allyTeam=$allyTeamsMap{$p_battleStatus->{team}};
         }
-        my $p_color = $battleData{users}->{$user}->{color};
+        my $p_color = $battleData{users}{$user}{color};
         my $red=sprintf("%.5f",($p_color->{red} / 255));
         my $blue=sprintf("%.5f",($p_color->{blue} / 255));
         my $green=sprintf("%.5f",($p_color->{green} / 255));
@@ -628,7 +629,7 @@ sub generateStartData {
 
   for my $botIndex (0..$#{$battleData{botList}}) {
     my $bot=$battleData{botList}->[$botIndex];
-    my $p_battleStatus=$battleData{bots}->{$bot}->{battleStatus};
+    my $p_battleStatus=$battleData{bots}{$bot}{battleStatus};
     if($p_battleStatus->{side} > $#{$p_sides}) {
       $sl->log("Side number of bot \"$bot\" is too big ($p_battleStatus->{side}), using max value for current MOD instead ($#{$p_sides})",2);
       $p_battleStatus->{side}=$#{$p_sides};
@@ -641,7 +642,7 @@ sub generateStartData {
       }else{
         $allyTeam=$allyTeamsMap{$p_battleStatus->{team}};
       }
-      my $p_color = $battleData{bots}->{$bot}->{color};
+      my $p_color = $battleData{bots}{$bot}{color};
       my $red=sprintf("%.5f",($p_color->{red} / 255));
       my $blue=sprintf("%.5f",($p_color->{blue} / 255));
       my $green=sprintf("%.5f",($p_color->{green} / 255));
@@ -652,16 +653,16 @@ sub generateStartData {
       $teamsMap{$p_battleStatus->{id}}=$nextTeam++;
     }
     my $team=$teamsMap{$p_battleStatus->{id}};
-    $teamsData{$team}->{TeamLeader}=aindex(@{$battleData{userList}},$battleData{bots}->{$bot}->{owner});
+    $teamsData{$team}{TeamLeader}=aindex(@{$battleData{userList}},$battleData{bots}{$bot}{owner});
   }
   
   foreach my $allyTeam (keys %allyTeamsMap) {
     my $realAllyTeam = $allyTeamsMap{$allyTeam};
-    if(exists $battleData{startRects}->{$allyTeam}) {
-      $allyTeamsData{$realAllyTeam}= { StartRectTop => $battleData{startRects}->{$allyTeam}->{top}/200,
-                                       StartRectLeft => $battleData{startRects}->{$allyTeam}->{left}/200,
-                                       StartRectBottom => $battleData{startRects}->{$allyTeam}->{bottom}/200,
-                                       StartRectRight => $battleData{startRects}->{$allyTeam}->{right}/200 };
+    if(exists $battleData{startRects}{$allyTeam}) {
+      $allyTeamsData{$realAllyTeam}= { StartRectTop => $battleData{startRects}{$allyTeam}{top}/200,
+                                       StartRectLeft => $battleData{startRects}{$allyTeam}{left}/200,
+                                       StartRectBottom => $battleData{startRects}{$allyTeam}{bottom}/200,
+                                       StartRectRight => $battleData{startRects}{$allyTeam}{right}/200 };
     }else{
       $allyTeamsData{$realAllyTeam}= {};
     }
@@ -669,10 +670,10 @@ sub generateStartData {
 
   foreach my $allyTeam (sort keys %{$battleData{startRects}}) {
     next if(exists $allyTeamsMap{$allyTeam});
-    $allyTeamsData{$nextAllyTeam++}= { StartRectTop => $battleData{startRects}->{$allyTeam}->{top}/200,
-                                       StartRectLeft => $battleData{startRects}->{$allyTeam}->{left}/200,
-                                       StartRectBottom => $battleData{startRects}->{$allyTeam}->{bottom}/200,
-                                       StartRectRight => $battleData{startRects}->{$allyTeam}->{right}/200 };
+    $allyTeamsData{$nextAllyTeam++}= { StartRectTop => $battleData{startRects}{$allyTeam}{top}/200,
+                                       StartRectLeft => $battleData{startRects}{$allyTeam}{left}/200,
+                                       StartRectBottom => $battleData{startRects}{$allyTeam}{bottom}/200,
+                                       StartRectRight => $battleData{startRects}{$allyTeam}{right}/200 };
   }
 
   my @startData=("[GAME]","{");
@@ -686,7 +687,7 @@ sub generateStartData {
     }else{
       next;
     }
-    push(@startData,"  $realTag=$battleData{scriptTags}->{$tag};");
+    push(@startData,"  $realTag=$battleData{scriptTags}{$tag};");
   }
   push(@startData,"");
   foreach my $tag (keys %{$p_additionalData}) {
@@ -704,9 +705,9 @@ sub generateStartData {
   push(@startData,"");
   if($autoHostMode) {
     push(@startData,"  AutoHostName=$self->{login};");
-    push(@startData,"  AutoHostCountryCode=$self->{users}->{$self->{login}}->{country};");
-    push(@startData,"  AutoHostRank=$self->{users}->{$self->{login}}->{status}->{rank};");
-    push(@startData,"  AutoHostAccountId=$self->{users}->{$self->{login}}->{accountId};");
+    push(@startData,"  AutoHostCountryCode=$self->{users}{$self->{login}}{country};");
+    push(@startData,"  AutoHostRank=$self->{users}{$self->{login}}{status}{rank};");
+    push(@startData,"  AutoHostAccountId=$self->{users}{$self->{login}}{accountId};");
     push(@startData,"");
   }
   if($autoHostMode != 1) {
@@ -726,34 +727,34 @@ sub generateStartData {
 
   for my $userIndex (0..$#{$battleData{userList}}) {
     my $user=$battleData{userList}->[$userIndex];
-    my $p_battleStatus=$battleData{users}->{$user}->{battleStatus};
+    my $p_battleStatus=$battleData{users}{$user}{battleStatus};
     my $team=$teamsMap{$p_battleStatus->{id}};
     push(@startData,"  [PLAYER$userIndex]");
     push(@startData,"  {");
     push(@startData,"    Name=$user;");
-    push(@startData,"    Password=$battleData{users}->{$user}->{scriptPass};") if(defined $battleData{users}->{$user}->{scriptPass});
+    push(@startData,"    Password=$battleData{users}{$user}{scriptPass};") if(defined $battleData{users}{$user}{scriptPass});
     push(@startData,"    Spectator=".(1 - $p_battleStatus->{mode}).";");
     push(@startData,"    Team=$team;") if($p_battleStatus->{mode});
-    if(exists $self->{users}->{$user}) {
-      my $playerAccountId=$self->{users}->{$user}->{accountId};
-      push(@startData,"    CountryCode=$self->{users}->{$user}->{country};");
-      push(@startData,"    Rank=$self->{users}->{$user}->{status}->{rank};");
+    if(exists $self->{users}{$user}) {
+      my $playerAccountId=$self->{users}{$user}{accountId};
+      push(@startData,"    CountryCode=$self->{users}{$user}{country};");
+      push(@startData,"    Rank=$self->{users}{$user}{status}{rank};");
       push(@startData,"    AccountId=$playerAccountId;");
-      if(exists $p_additionalData->{playerData} && exists $p_additionalData->{playerData}->{$playerAccountId}) {
-        foreach my $tag (keys %{$p_additionalData->{playerData}->{$playerAccountId}}) {
-          push(@startData,"    $tag=$p_additionalData->{playerData}->{$playerAccountId}->{$tag};")
+      if(exists $p_additionalData->{playerData} && exists $p_additionalData->{playerData}{$playerAccountId}) {
+        foreach my $tag (keys %{$p_additionalData->{playerData}{$playerAccountId}}) {
+          push(@startData,"    $tag=$p_additionalData->{playerData}{$playerAccountId}{$tag};")
         }
       }
     }
-    push(@startData,'    Skill='.$battleData{scriptTags}->{'game/players/'.lc($user).'/skill'}.';') if(exists $battleData{scriptTags}->{'game/players/'.lc($user).'/skill'});
-    push(@startData,'    SkillUncertainty='.$battleData{scriptTags}->{'game/players/'.lc($user).'/skilluncertainty'}.';') if(exists $battleData{scriptTags}->{'game/players/'.lc($user).'/skilluncertainty'});
+    push(@startData,'    Skill='.$battleData{scriptTags}{'game/players/'.lc($user).'/skill'}.';') if(exists $battleData{scriptTags}{'game/players/'.lc($user).'/skill'});
+    push(@startData,'    SkillUncertainty='.$battleData{scriptTags}{'game/players/'.lc($user).'/skilluncertainty'}.';') if(exists $battleData{scriptTags}{'game/players/'.lc($user).'/skilluncertainty'});
     push(@startData,"  }");
   }
   for my $botIndex (0..$#{$battleData{botList}}) {
     my $bot=$battleData{botList}->[$botIndex];
-    my $p_battleStatus=$battleData{bots}->{$bot}->{battleStatus};
+    my $p_battleStatus=$battleData{bots}{$bot}{battleStatus};
     my $team=$teamsMap{$p_battleStatus->{id}};
-    my $aiShortName=$battleData{bots}->{$bot}->{aiDll};
+    my $aiShortName=$battleData{bots}{$bot}{aiDll};
     my $aiVersion;
     ($aiShortName,$aiVersion)=($1,$2) if($aiShortName =~ /^([^\|]+)\|(.+)$/);
     push(@startData,"  [AI$botIndex]");
@@ -761,7 +762,7 @@ sub generateStartData {
     push(@startData,"    Name=$bot;");
     push(@startData,"    ShortName=$aiShortName;");
     push(@startData,"    Team=$team;");
-    push(@startData,"    Host=".aindex(@{$battleData{userList}},$battleData{bots}->{$bot}->{owner}).';');
+    push(@startData,"    Host=".aindex(@{$battleData{userList}},$battleData{bots}{$bot}{owner}).';');
     push(@startData,"    Version=$aiVersion;") if(defined $aiVersion);
     push(@startData,"  }");
   }
@@ -772,7 +773,7 @@ sub generateStartData {
     push(@startData,"  [TEAM$teamIndex]");
     push(@startData,"  {");
     foreach my $k (keys %{$teamsData{$teamIndex}}) {
-      push(@startData,"    $k=$teamsData{$teamIndex}->{$k};");
+      push(@startData,"    $k=$teamsData{$teamIndex}{$k};");
     }
     push(@startData,"  }"); 
   }
@@ -784,7 +785,7 @@ sub generateStartData {
     push(@startData,"  {");
     push(@startData,"    NumAllies=0;");
     foreach my $k (keys %{$allyTeamsData{$teamAllyIndex}}) {
-      push(@startData,"    $k=$allyTeamsData{$teamAllyIndex}->{$k};");
+      push(@startData,"    $k=$allyTeamsData{$teamAllyIndex}{$k};");
     }
     push(@startData,"  }"); 
   }
@@ -810,7 +811,7 @@ sub generateStartData {
     }else{
       next;
     }
-    push(@startData,"    $realTag=$battleData{scriptTags}->{$tag};");
+    push(@startData,"    $realTag=$battleData{scriptTags}{$tag};");
   }
   foreach my $tag (keys %{$p_additionalData}) {
     my $realTag=$tag;
@@ -832,7 +833,7 @@ sub generateStartData {
     }else{
       next;
     }
-    push(@startData,"    $realTag=$battleData{scriptTags}->{$tag};");
+    push(@startData,"    $realTag=$battleData{scriptTags}{$tag};");
   }
   foreach my $tag (keys %{$p_additionalData}) {
     my $realTag=$tag;
@@ -856,11 +857,11 @@ sub addCallbacks {
   $nbCalls=0 unless(defined $nbCalls);
   my %callbacks=%{$p_callbacks};
   foreach my $command (keys %callbacks) {
-    $self->{callbacks}->{$command}={} unless(exists $self->{callbacks}->{$command});
-    if(exists $self->{callbacks}->{$command}->{$priority}) {
-      $self->{conf}->{simpleLog}->log("Replacing an existing $command callback for priority \"$priority\"",2);
+    $self->{callbacks}{$command}={} unless(exists $self->{callbacks}{$command});
+    if(exists $self->{callbacks}{$command}{$priority}) {
+      $self->{conf}{simpleLog}->log("Replacing an existing $command callback for priority \"$priority\"",2);
     }
-    $self->{callbacks}->{$command}->{$priority}=[$callbacks{$command},$nbCalls];
+    $self->{callbacks}{$command}{$priority}=[$callbacks{$command},$nbCalls];
   }
 }
 
@@ -869,9 +870,9 @@ sub removeCallbacks {
   $priority=caller() unless(defined $priority);
   my @commands=@{$p_commands};
   foreach my $command (@commands) {
-    if(exists $self->{callbacks}->{$command}) {
-      delete $self->{callbacks}->{$command}->{$priority};
-      delete $self->{callbacks}->{$command} unless(%{$self->{callbacks}->{$command}});
+    if(exists $self->{callbacks}{$command}) {
+      delete $self->{callbacks}{$command}{$priority};
+      delete $self->{callbacks}{$command} unless(%{$self->{callbacks}{$command}});
     }
   }
 }
@@ -880,11 +881,11 @@ sub addPreCallbacks {
   my ($self,$p_preCallbacks,$priority)=@_;
   $priority=caller() unless(defined $priority);
   foreach my $command (keys %{$p_preCallbacks}) {
-    $self->{preCallbacks}->{$command}={} unless(exists $self->{preCallbacks}->{$command});
-    if(exists $self->{preCallbacks}->{$command}->{$priority}) {
-      $self->{conf}->{simpleLog}->log("Replacing an existing $command pre-callback for priority \"$priority\"",2);
+    $self->{preCallbacks}{$command}={} unless(exists $self->{preCallbacks}{$command});
+    if(exists $self->{preCallbacks}{$command}{$priority}) {
+      $self->{conf}{simpleLog}->log("Replacing an existing $command pre-callback for priority \"$priority\"",2);
     }
-    $self->{preCallbacks}->{$command}->{$priority}=$p_preCallbacks->{$command};
+    $self->{preCallbacks}{$command}{$priority}=$p_preCallbacks->{$command};
   }
 }
 
@@ -892,9 +893,9 @@ sub removePreCallbacks {
   my ($self,$p_commands,$priority)=@_;
   $priority=caller() unless(defined $priority);
   foreach my $command (@{$p_commands}) {
-    if(exists $self->{preCallbacks}->{$command}) {
-      delete $self->{preCallbacks}->{$command}->{$priority};
-      delete $self->{preCallbacks}->{$command} unless(%{$self->{preCallbacks}->{$command}});
+    if(exists $self->{preCallbacks}{$command}) {
+      delete $self->{preCallbacks}{$command}{$priority};
+      delete $self->{preCallbacks}{$command} unless(%{$self->{preCallbacks}{$command}});
     }
   }
 }
@@ -904,13 +905,13 @@ sub checkTimeouts {
   my %conf=%{$self->{conf}};
   my $sl=$conf{simpleLog};
   foreach my $pr (keys %{$self->{pendingRequests}}) {
-    my ($p_callbacks,$timeout,$p_timeoutCallback)=@{$self->{pendingRequests}->{$pr}};
+    my ($p_callbacks,$timeout,$p_timeoutCallback)=@{$self->{pendingRequests}{$pr}};
     if(time > $timeout) {
       $sl->log("Timeout for request \"$pr\"",2);
       foreach my $cbtr (keys %{$p_callbacks}) {
-        delete $self->{pendingResponses}->{$cbtr};
+        delete $self->{pendingResponses}{$cbtr};
       }
-      delete $self->{pendingRequests}->{$pr};
+      delete $self->{pendingRequests}{$pr};
       if($p_timeoutCallback) {
         &{$p_timeoutCallback}($pr);
       }
@@ -940,8 +941,8 @@ sub connect {
   }
   $self->{lastSndTs}=time;
   if(defined $disconnectCallback) {
-    $self->{callbacks}->{"_DISCONNECT_"}={} unless(exists $self->{callbacks}->{"_DISCONNECT_"});
-    $self->{callbacks}->{"_DISCONNECT_"}->{$priority}=$disconnectCallback;
+    $self->{callbacks}{"_DISCONNECT_"}={} unless(exists $self->{callbacks}{"_DISCONNECT_"});
+    $self->{callbacks}{"_DISCONNECT_"}{$priority}=$disconnectCallback;
   }
   if(defined $p_callbacks) {
     my %callbacks=%{$p_callbacks};
@@ -950,9 +951,9 @@ sub connect {
         $timeoutCallback=0;
       }
       foreach my $response (keys %callbacks) {
-        $self->{pendingResponses}->{$response}='_CONNECT_';
+        $self->{pendingResponses}{$response}='_CONNECT_';
       }
-      $self->{pendingRequests}->{'_CONNECT_'}=[$p_callbacks,time+$conf{timeout},$timeoutCallback];
+      $self->{pendingRequests}{'_CONNECT_'}=[$p_callbacks,time+$conf{timeout},$timeoutCallback];
     }
   }
   return $self->{lobbySock};
@@ -1019,9 +1020,9 @@ sub sendCommand {
         $p_timeoutCallback=0;
       }
       foreach my $response (keys %callbacks) {
-        $self->{pendingResponses}->{$response}=$p_command->[0];
+        $self->{pendingResponses}{$response}=$p_command->[0];
       }
-      $self->{pendingRequests}->{$p_command->[0]}=[$p_callbacks,time+$conf{timeout},$p_timeoutCallback];
+      $self->{pendingRequests}{$p_command->[0]}=[$p_callbacks,time+$conf{timeout},$p_timeoutCallback];
     }
   }
   return 1;
@@ -1055,15 +1056,15 @@ sub receiveCommand {
   $data='' unless(defined $data);
   if($data eq '') {
     $sl->log("Connection reset by peer or library used with unready socket",2);
-    if(exists($self->{preCallbacks}->{'_DISCONNECT_'})) {
-      foreach my $prio (sort prioSort (keys %{$self->{preCallbacks}->{'_DISCONNECT_'}})) {
-        my $p_preCallback=$self->{preCallbacks}->{'_DISCONNECT_'}->{$prio};
+    if(exists($self->{preCallbacks}{'_DISCONNECT_'})) {
+      foreach my $prio (sort prioSort (keys %{$self->{preCallbacks}{'_DISCONNECT_'}})) {
+        my $p_preCallback=$self->{preCallbacks}{'_DISCONNECT_'}{$prio};
         &{$p_preCallback}() if($p_preCallback);
       }
     }
-    if(exists $self->{callbacks}->{"_DISCONNECT_"}) {
-      foreach my $prio (sort prioSort (keys %{$self->{callbacks}->{'_DISCONNECT_'}})) {
-        &{$self->{callbacks}->{'_DISCONNECT_'}->{$prio}}();
+    if(exists $self->{callbacks}{"_DISCONNECT_"}) {
+      foreach my $prio (sort prioSort (keys %{$self->{callbacks}{'_DISCONNECT_'}})) {
+        &{$self->{callbacks}{'_DISCONNECT_'}{$prio}}();
       }
     }
     return 0;
@@ -1095,17 +1096,17 @@ sub receiveCommand {
     }
     my $processed=0;
     
-    if(exists($self->{preCallbacks}->{'_ALL_'})) {
-      foreach my $prio (sort prioSort (keys %{$self->{preCallbacks}->{'_ALL_'}})) {
+    if(exists($self->{preCallbacks}{'_ALL_'})) {
+      foreach my $prio (sort prioSort (keys %{$self->{preCallbacks}{'_ALL_'}})) {
         $processed=1;
-        my $p_preCallback=$self->{preCallbacks}->{'_ALL_'}->{$prio};
+        my $p_preCallback=$self->{preCallbacks}{'_ALL_'}{$prio};
         &{$p_preCallback}(@{$p_command}) if($p_preCallback);
       }
     }
-    if(exists($self->{preCallbacks}->{$realCommandName})) {
-      foreach my $prio (sort prioSort (keys %{$self->{preCallbacks}->{$realCommandName}})) {
+    if(exists($self->{preCallbacks}{$realCommandName})) {
+      foreach my $prio (sort prioSort (keys %{$self->{preCallbacks}{$realCommandName}})) {
         $processed=1;
-        my $p_preCallback=$self->{preCallbacks}->{$realCommandName}->{$prio};
+        my $p_preCallback=$self->{preCallbacks}{$realCommandName}{$prio};
         &{$p_preCallback}(@{$p_command}) if($p_preCallback);
       }
     }
@@ -1114,31 +1115,35 @@ sub receiveCommand {
     if(exists($commandHandlers{$realCommandName})) {
       $processed=1;
       $handlerTime=time;
-      $rc = &{$commandHandlers{$realCommandName}}($self,@{$p_command}) && $rc if($commandHandlers{$realCommandName});
+      if($commandHandlers{$realCommandName}) {
+        my $handlerRc=&{$commandHandlers{$realCommandName}}($self,@{$p_command});
+        $rc = $handlerRc && $rc;
+        &{$conf{inconsistencyHandler}}($realCommandName,$marshalledCommand) if(! $handlerRc && $conf{inconsistencyHandler});
+      }
       $handlerTime=time-$handlerTime;
     }
     my $cName="_DEFAULT_";
-    if(exists($self->{callbacks}->{$realCommandName})) {
+    if(exists($self->{callbacks}{$realCommandName})) {
       $cName=$realCommandName;
     }
-    if(exists($self->{callbacks}->{$commandName})) {
+    if(exists($self->{callbacks}{$commandName})) {
       $cName=$commandName;
     }
-    if(exists($self->{callbacks}->{$cName})) {
-      foreach my $prio (sort prioSort (keys %{$self->{callbacks}->{$cName}})) {
-        my ($callback,$nbCalls)=@{$self->{callbacks}->{$cName}->{$prio}};
+    if(exists($self->{callbacks}{$cName})) {
+      foreach my $prio (sort prioSort (keys %{$self->{callbacks}{$cName}})) {
+        my ($callback,$nbCalls)=@{$self->{callbacks}{$cName}{$prio}};
         $processed=1;
         if($nbCalls == 1) {
-          delete $self->{callbacks}->{$cName}->{$prio};
+          delete $self->{callbacks}{$cName}{$prio};
         }elsif($nbCalls > 1) {
           $nbCalls-=1;
-          $self->{callbacks}->{$cName}->{$prio}=[$callback,$nbCalls];
+          $self->{callbacks}{$cName}{$prio}=[$callback,$nbCalls];
         }
         $callbackTime=time;
         $rc = &{$callback}(@{$p_command}) && $rc if($callback);
         $callbackTime=time-$callbackTime;
       }
-      delete $self->{callbacks}->{$cName} unless(%{$self->{callbacks}->{$cName}});
+      delete $self->{callbacks}{$cName} unless(%{$self->{callbacks}{$cName}});
     }
     if(defined $handlerTime) {
       if(defined $callbackTime) {
@@ -1160,17 +1165,17 @@ sub receiveCommand {
       $sl->log("Stats for $realCommandName: callback took $callbackTime second(s)",$statsLevel);
     }
     $cName=$realCommandName;
-    if(exists($self->{pendingResponses}->{$commandName})) {
+    if(exists($self->{pendingResponses}{$commandName})) {
       $cName=$commandName;
     }
-    if(exists($self->{pendingResponses}->{$cName})) {
-      my $request=$self->{pendingResponses}->{$cName};
-      my ($p_callbacks,$timeout,$p_timeoutCallback)=@{$self->{pendingRequests}->{$request}};
+    if(exists($self->{pendingResponses}{$cName})) {
+      my $request=$self->{pendingResponses}{$cName};
+      my ($p_callbacks,$timeout,$p_timeoutCallback)=@{$self->{pendingRequests}{$request}};
       my $callback=$p_callbacks->{$cName};
       foreach my $cbtr (keys %{$p_callbacks}) {
-        delete $self->{pendingResponses}->{$cbtr};
+        delete $self->{pendingResponses}{$cbtr};
       }
-      delete $self->{pendingRequests}->{$request};
+      delete $self->{pendingRequests}{$request};
       $processed=1;
       $rc = &{$callback}(@{$p_command}) && $rc if($callback);
     }
@@ -1186,15 +1191,16 @@ sub receiveCommand {
 
 sub checkIntParams {
   my ($self,$commandName,$p_paramNames,$p_paramPointers)=@_;
+  my $sl=$self->{conf}{simpleLog};
   if($#{$p_paramNames} != $#{$p_paramPointers}) {
-    $self->{conf}->{simpleLog}->log("Invalid call of checkIntParams: paramNames length is $#{$p_paramNames} whereas paramPointers length is $#{$p_paramPointers}",1);
+    $sl->log("Invalid call of checkIntParams: paramNames length is $#{$p_paramNames} whereas paramPointers length is $#{$p_paramPointers}",1);
     return {};
   }
   my %invalidParams;
   for my $i (0..$#{$p_paramNames}) {
     if(${$p_paramPointers->[$i]} !~ /^-?\d+$/) {
       $invalidParams{$p_paramNames->[$i]}=${$p_paramPointers->[$i]};
-      $self->{conf}->{simpleLog}->log("Found invalid $p_paramNames->[$i] parameter value \"${$p_paramPointers->[$i]}\" (should be integer) in lobby command $commandName",2);
+      $sl->log("Found invalid $p_paramNames->[$i] parameter value \"${$p_paramPointers->[$i]}\" (should be integer) in lobby command $commandName",2);
       ${$p_paramPointers->[$i]}=0;
     }
   }
@@ -1204,6 +1210,7 @@ sub checkIntParams {
 sub tasserverHandler {
   my ($self,undef,undef,$defaultSpringVersion)=@_;
   $self->{defaultSpringVersion}=$defaultSpringVersion;
+  return 1;
 }
 
 sub acceptedHandler {
@@ -1216,67 +1223,79 @@ sub addUserHandler {
   my ($self,undef,$user,$country,$cpu,$accountId)=@_;
   $accountId=0 unless(defined $accountId);
   $self->checkIntParams('ADDUSER',[qw/cpu accountId/],[\$cpu,\$accountId]);
-  $self->{users}->{$user} = { country => $country,
-                              cpu => $cpu,
-                              accountId => $accountId,
-                              ip => undef,
-                              status => { inGame => 0,
-                                          rank => 0,
-                                          away => 0,
-                                          access => 0,
-                                          bot => 0 } };
-  $self->{accounts}->{$accountId}=$user if($accountId);
+  my $sl=$self->{conf}{simpleLog};
+  $sl->log("Duplicate ADDUSER command for user \"$user\")",2) if(exists $self->{users}{$user});
+  $self->{users}{$user} = { country => $country,
+                            cpu => $cpu,
+                            accountId => $accountId,
+                            ip => undef,
+                            status => { inGame => 0,
+                                        rank => 0,
+                                        away => 0,
+                                        access => 0,
+                                        bot => 0 } };
+  $self->{accounts}{$accountId}=$user if($accountId);
   return 1;
 }
 
 sub removeUserHandler {
   my ($self,undef,$user)=@_;
-  delete $self->{accounts}->{$self->{users}->{$user}->{accountId}} if($self->{users}->{$user}->{accountId});
-  delete $self->{users}->{$user};
+  my $sl=$self->{conf}{simpleLog};
+  if(! exists $self->{users}{$user}) {
+    $sl->log("Ignoring REMOVEUSER command (unknown user:\"$user\")",1);
+    return 0;
+  }
+  delete $self->{accounts}{$self->{users}{$user}{accountId}} if($self->{users}{$user}{accountId});
+  delete $self->{users}{$user};
   return 1;
 }
 
 sub clientStatusHandler {
   my ($self,undef,$user,$status)=@_;
-  my %conf=%{$self->{conf}};
-  my $sl=$conf{simpleLog};
-  if(exists $self->{users}->{$user}) {
-    my $p_clientStatus = $self->unmarshallClientStatus($status);
-    if($user eq $self->{login}) {
-      my $currentInGameStatus=$self->{users}->{$user}->{status}->{inGame};
-      if( $currentInGameStatus == 0 && $p_clientStatus->{inGame} == 1) {
-        if(exists $self->{battle}->{battleId}) {
-          $self->storeRunningBattle();
-        }
-      }elsif($currentInGameStatus == 1 && $p_clientStatus->{inGame} == 0) {
-        $self->{runningBattle}={};
-      }
-    }
-    $self->{users}->{$user}->{status}=$p_clientStatus;
-  }else{
+  my $sl=$self->{conf}{simpleLog};
+  if(! exists $self->{users}{$user}) {
     $sl->log("Ignoring CLIENTSTATUS command (unknown user:\"$user\")",1);
     return 0;
   }
+  my $p_clientStatus = $self->unmarshallClientStatus($status);
+  if($user eq $self->{login}) {
+    my $currentInGameStatus=$self->{users}{$user}{status}{inGame};
+    if( $currentInGameStatus == 0 && $p_clientStatus->{inGame} == 1) {
+      if(exists $self->{battle}{battleId}) {
+        $self->storeRunningBattle();
+      }
+    }elsif($currentInGameStatus == 1 && $p_clientStatus->{inGame} == 0) {
+      $self->{runningBattle}={};
+    }
+  }
+  $self->{users}{$user}{status}=$p_clientStatus;
   return 1;
 }
 
 sub joinHandler {
   my ($self,undef,$channel)=@_;
-  $self->{channels}->{$channel}={};
+  $self->{channels}{$channel}={};
   return 1;
 }
 
 sub clientsHandler {
   my ($self,undef,$channel,$usersList)=@_;
-  my %conf=%{$self->{conf}};
-  my $sl=$conf{simpleLog};
-  if(exists $self->{channels}->{$channel}) {
-    my @users=split(" ",$usersList);
-    foreach my $user (@users) {
-      $self->{channels}->{$channel}->{$user}=1;
-    }
-  }else{
+  my $sl=$self->{conf}{simpleLog};
+  if(! exists $self->{channels}{$channel}) {
     $sl->log("Ignoring CLIENTS command (non joined channel:\"$channel\")",1);
+    return 0;
+  }
+  my @users=split(' ',$usersList);
+  my @unknownUsers;
+  foreach my $user (@users) {
+    if(exists $self->{users}{$user}) {
+      $self->{channels}{$channel}{$user}=1;
+    }else{
+      push(@unknownUsers,$user);
+    }
+  }
+  if(@unknownUsers) {
+    $sl->log('Ignoring CLIENTS command (unknown user'.($#unknownUsers>0 ? 's' : '').': '.(join(',',@unknownUsers)).')',1);
     return 0;
   }
   return 1;
@@ -1284,32 +1303,48 @@ sub clientsHandler {
 
 sub joinedHandler {
   my ($self,undef,$channel,$user)=@_;
-  my %conf=%{$self->{conf}};
-  my $sl=$conf{simpleLog};
-  if(exists $self->{channels}->{$channel}) {
-    $self->{channels}->{$channel}->{$user}=1;
-  }else{
+  my $sl=$self->{conf}{simpleLog};
+  if(! exists $self->{channels}{$channel}) {
     $sl->log("Ignoring JOINED command (non joined channel:\"$channel\")",1);
     return 0;
   }
+  if(! exists $self->{users}{$user}) {
+    $sl->log("Ignoring JOINED command (unknown user:\"$user\")",1);
+    return 0;
+  }
+  $self->{channels}{$channel}{$user}=1;
   return 1;
 }
 
 sub leftHandler {
   my ($self,undef,$channel,$user)=@_;
-  delete $self->{channels}->{$channel}->{$user};
+  my $sl=$self->{conf}{simpleLog};
+  if(! exists $self->{channels}{$channel}) {
+    $sl->log("Ignoring LEFT command (non joined channel:\"$channel\")",1);
+    return 0;
+  }
+  if(! exists $self->{users}{$user}) {
+    $sl->log("Ignoring LEFT command (unknown user:\"$user\")",1);
+    return 0;
+  }
+  delete $self->{channels}{$channel}{$user};
   return 1;
 }
 
 sub leaveChannelHandler {
   my ($self,undef,$channel)=@_;
-  delete $self->{channels}->{$channel};
+  delete $self->{channels}{$channel};
   return 1;
 }
 
 sub battleOpenedHandler {
   my ($self,undef,$battleId,$type,$natType,$founder,$ip,$port,$maxPlayers,$passworded,$rank,$mapHash,@otherParams)=@_;
   $self->checkIntParams('BATTLEOPENED',[qw/battleId type natType port maxPlayers passworded rank mapHash/],[\$battleId,\$type,\$natType,\$port,\$maxPlayers,\$passworded,\$rank,\$mapHash]);
+  my $sl=$self->{conf}{simpleLog};
+  if(! exists $self->{users}{$founder}) {
+    $sl->log("Ignoring BATTLEOPENED command (unknown founder:\"$founder\")",1);
+    return 0;
+  }
   my ($engineName,$engineVersion,$map,$title,$mod);
   if($#otherParams < 4) {
     ($map,$title,$mod)=@otherParams;
@@ -1318,92 +1353,85 @@ sub battleOpenedHandler {
   }else{
     ($engineName,$engineVersion,$map,$title,$mod)=@otherParams;
   }
-  $self->{battles}->{$battleId} = { type => $type,
-                                    natType => $natType,
-                                    founder => $founder,
-                                    ip => $ip,
-                                    port => $port,
-                                    maxPlayers => $maxPlayers,
-                                    passworded => $passworded,
-                                    rank => $rank,
-                                    mapHash => $mapHash,
-                                    engineName => $engineName,
-                                    engineVersion => $engineVersion,
-                                    map => $map,
-                                    title => $title,
-                                    mod => $mod,
-                                    userList => [$founder],
-                                    nbSpec => 0,
-                                    locked => 0};
+  $self->{battles}{$battleId} = { type => $type,
+                                  natType => $natType,
+                                  founder => $founder,
+                                  ip => $ip,
+                                  port => $port,
+                                  maxPlayers => $maxPlayers,
+                                  passworded => $passworded,
+                                  rank => $rank,
+                                  mapHash => $mapHash,
+                                  engineName => $engineName,
+                                  engineVersion => $engineVersion,
+                                  map => $map,
+                                  title => $title,
+                                  mod => $mod,
+                                  userList => [$founder],
+                                  nbSpec => 0,
+                                  locked => 0};
   return 1;
 }
 
 sub battleClosedHandler {
   my ($self,undef,$battleId)=@_;
-  delete $self->{battles}->{$battleId};
-  $self->{battle}={} if(exists $self->{battle}->{battleId} && $self->{battle}->{battleId} == $battleId);
+  delete $self->{battles}{$battleId};
+  $self->{battle}={} if(exists $self->{battle}{battleId} && $self->{battle}{battleId} == $battleId);
   return 1;
 }
 
 sub joinedBattleHandler {
   my ($self,undef,$battleId,$user,$scriptPass)=@_;
-  my %conf=%{$self->{conf}};
-  my $sl=$conf{simpleLog};
-  if(exists $self->{battles}->{$battleId}) {
-    push(@{$self->{battles}->{$battleId}->{userList}},$user);
-    if(exists $self->{battle}->{battleId}) {
-      if($battleId eq $self->{battle}->{battleId}) {
-        $self->{battle}->{users}->{$user}={battleStatus => undef, color => undef, ip => undef, port => undef, scriptPass => $scriptPass};
-      }
-    }
-  }else{
+  my $sl=$self->{conf}{simpleLog};
+  if(! exists $self->{battles}{$battleId}) {
     $sl->log("Ignoring JOINEDBATTLE command (unknown battle:\"$battleId\")",1);
     return 0;
+  }
+  if(! exists $self->{users}{$user}) {
+    $sl->log("Ignoring JOINEDBATTLE command (unknown user:\"$user\")",1);
+    return 0;
+  }
+  push(@{$self->{battles}{$battleId}{userList}},$user);
+  if(exists $self->{battle}{battleId} && $battleId eq $self->{battle}{battleId}) {
+    $self->{battle}{users}{$user}={battleStatus => undef, color => undef, ip => undef, port => undef, scriptPass => $scriptPass};
   }
   return 1;
 }
 
 sub leftBattleHandler {
   my ($self,undef,$battleId,$user)=@_;
-  my %conf=%{$self->{conf}};
-  my $sl=$conf{simpleLog};
-  if(exists $self->{battles}->{$battleId}) {
-    my @userList=@{$self->{battles}->{$battleId}->{userList}};
-    my $userIndex=aindex(@userList,$user);
-    if($userIndex != -1) {
-      splice(@userList,$userIndex,1);
-      $self->{battles}->{$battleId}->{userList}=\@userList;
-    }else{
-      $sl->log("Ignoring LEFTBATTLE command (user already out of battle:\"$user\")",1);
-      return 0;
-    }
-    if(exists $self->{battle}->{battleId}) {
-      if($battleId eq $self->{battle}->{battleId}) {
-        delete $self->{battle}->{users}->{$user};
-      }
-    }
-    $self->{battle}={} if($user eq $self->{login});
-  }else{
+  my $sl=$self->{conf}{simpleLog};
+  if(! exists $self->{battles}{$battleId}) {
     $sl->log("Ignoring LEFTBATTLE command (unknown battle:\"$battleId\")",1);
     return 0;
   }
+  my @userList=@{$self->{battles}{$battleId}{userList}};
+  my $userIndex=aindex(@userList,$user);
+  if($userIndex == -1) {
+    $sl->log("Ignoring LEFTBATTLE command (user already out of battle:\"$user\")",1);
+    return 0;
+  }
+  splice(@userList,$userIndex,1);
+  $self->{battles}{$battleId}{userList}=\@userList;
+  if(exists $self->{battle}{battleId} && $battleId eq $self->{battle}{battleId}) {
+    delete $self->{battle}{users}{$user};
+  }
+  $self->{battle}={} if($user eq $self->{login});
   return 1;
 }
 
 sub updateBattleInfoHandler {
   my ($self,undef,$battleId,$nbSpec,$locked,$mapHash,$map)=@_;
   $self->checkIntParams('UPDATEBATTLEINFO',[qw/battleId nbSpec locked mapHash/],[\$battleId,\$nbSpec,\$locked,\$mapHash]);
-  my %conf=%{$self->{conf}};
-  my $sl=$conf{simpleLog};
-  if(exists $self->{battles}->{$battleId}) {
-    $self->{battles}->{$battleId}->{nbSpec}=$nbSpec;
-    $self->{battles}->{$battleId}->{locked}=$locked;
-    $self->{battles}->{$battleId}->{mapHash}=$mapHash;
-    $self->{battles}->{$battleId}->{map}=$map;
-  }else{
+  my $sl=$self->{conf}{simpleLog};
+  if(! exists $self->{battles}{$battleId}) {
     $sl->log("Ignoring UPDATEBATTLEINFO command (unknown battle:\"$battleId\")",1);
     return 0;
   }
+  $self->{battles}{$battleId}{nbSpec}=$nbSpec;
+  $self->{battles}{$battleId}{locked}=$locked;
+  $self->{battles}{$battleId}{mapHash}=$mapHash;
+  $self->{battles}{$battleId}{map}=$map;
   return 1;
 }
 
@@ -1417,25 +1445,23 @@ sub openBattleHook {
 sub openBattleHandler {
   my ($self,undef,$battleId)=@_;
   $self->checkIntParams('OPENBATTLE',['battleId'],[\$battleId]);
-  my %conf=%{$self->{conf}};
-  my $sl=$conf{simpleLog};
-  if(exists $self->{battles}->{$battleId}) {
-    $self->{battle} = { battleId => $battleId,
-                        users => {},
-                        bots => {},
-                        botList => [],
-                        founder => $self->{battles}->{$battleId}->{founder},
-                        disabledUnits => [],
-                        startRects => {},
-                        scriptTags => {},
-                        modHash => $self->{openBattleModHash},
-                        password => $self->{password} };
-    foreach my $user (@{$self->{battles}->{$battleId}->{userList}}) {
-      $self->{battle}->{users}->{$user}={battleStatus => undef, color => undef, ip => undef, port => undef};
-    }
-  }else{
+  my $sl=$self->{conf}{simpleLog};
+  if(! exists $self->{battles}{$battleId}) {
     $sl->log("Ignoring OPENBATTLE command (unknown battle:\"$battleId\")",1);
     return 0;
+  }
+  $self->{battle} = { battleId => $battleId,
+                      users => {},
+                      bots => {},
+                      botList => [],
+                      founder => $self->{battles}{$battleId}{founder},
+                      disabledUnits => [],
+                      startRects => {},
+                      scriptTags => {},
+                      modHash => $self->{openBattleModHash},
+                      password => $self->{password} };
+  foreach my $user (@{$self->{battles}{$battleId}{userList}}) {
+    $self->{battle}{users}{$user}={battleStatus => undef, color => undef, ip => undef, port => undef};
   }
   return 1;
 }
@@ -1448,250 +1474,223 @@ sub joinBattleHook {
 
 sub joinBattleHandler {
   my ($self,undef,$battleId,$modHash)=@_;
-  my %conf=%{$self->{conf}};
-  my $sl=$conf{simpleLog};
-  if(exists $self->{battles}->{$battleId}) {
-    $self->{battle} = { battleId => $battleId,
-                        users => {},
-                        bots => {},
-                        botList => [],
-                        founder => $self->{battles}->{$battleId}->{founder},
-                        disabledUnits => [],
-                        startRects => {},
-                        scriptTags => {},
-                        modHash => $modHash,
-                        password => $self->{password} };
-    foreach my $user (@{$self->{battles}->{$battleId}->{userList}}) {
-      $self->{battle}->{users}->{$user}={battleStatus => undef, color => undef, ip => undef, port => undef};
-    }
-  }else{
+  my $sl=$self->{conf}{simpleLog};
+  if(! exists $self->{battles}{$battleId}) {
     $sl->log("Ignoring JOINBATTLE command (unknown battle:\"$battleId\")",1);
     return 0;
+  }
+  $self->{battle} = { battleId => $battleId,
+                      users => {},
+                      bots => {},
+                      botList => [],
+                      founder => $self->{battles}{$battleId}{founder},
+                      disabledUnits => [],
+                      startRects => {},
+                      scriptTags => {},
+                      modHash => $modHash,
+                      password => $self->{password} };
+  foreach my $user (@{$self->{battles}{$battleId}{userList}}) {
+    $self->{battle}{users}{$user}={battleStatus => undef, color => undef, ip => undef, port => undef};
   }
   return 1;
 }
 
 sub joinBattleRequestHandler {
   my ($self,undef,$user,$ip)=@_;
-  my %conf=%{$self->{conf}};
-  my $sl=$conf{simpleLog};
-  if(exists $self->{users}->{$user}) {
-    $self->{users}->{$user}->{ip}=$ip;
-  }else{
+  my $sl=$self->{conf}{simpleLog};
+  if(! exists $self->{users}{$user}) {
     $sl->log("Ignoring JOINBATTLEREQUEST command (client \"$user\" offline)",1);
     return 0;
   }
+  $self->{users}{$user}{ip}=$ip;
+  return 1;
 }
 
 sub clientIpPortHandler {
   my ($self,undef,$user,$ip,$port)=@_;
   $self->checkIntParams('CLIENTIPPORT',['port'],[\$port]);
-  my %conf=%{$self->{conf}};
-  my $sl=$conf{simpleLog};
-  if(exists $self->{battle}->{users}) {
-    if(exists $self->{battle}->{users}->{$user}) {
-      $self->{battle}->{users}->{$user}->{ip}=$ip;
-      $self->{battle}->{users}->{$user}->{port}=$port;
-    }else{
-      $sl->log("Ignoring CLIENTIPPORT command (client \"$user\" out of current battle)",1);
-      return 0;
-    }
-  }else{
+  my $sl=$self->{conf}{simpleLog};
+  if(! exists $self->{battle}{users}) {
     $sl->log("Ignoring CLIENTIPPORT command (currently out of any battle)",1);
     return 0;
   }
+  if(! exists $self->{battle}{users}{$user}) {
+    $sl->log("Ignoring CLIENTIPPORT command (client \"$user\" out of current battle)",1);
+    return 0;
+  }
+  $self->{battle}{users}{$user}{ip}=$ip;
+  $self->{battle}{users}{$user}{port}=$port;
   return 1;
 }
 
 sub clientBattleStatusHandler {
   my ($self,undef,$user,$battleStatus,$color)=@_;
-  my %conf=%{$self->{conf}};
-  my $sl=$conf{simpleLog};
-  if(exists $self->{battle}->{users}) {
-    if(exists $self->{battle}->{users}->{$user}) {
-      $self->{battle}->{users}->{$user}->{battleStatus}=$self->unmarshallBattleStatus($battleStatus);
-      $self->{battle}->{users}->{$user}->{color}=$self->unmarshallColor($color);
-    }else{
-      $sl->log("Ignoring CLIENTBATTLESTATUS command (client \"$user\" out of current battle)",1);
-      return 0;
-    }
-  }else{
+  my $sl=$self->{conf}{simpleLog};
+  if(! exists $self->{battle}{users}) {
     $sl->log("Ignoring CLIENTBATTLESTATUS command (currently out of any battle)",1);
     return 0;
   }
+  if(! exists $self->{battle}{users}{$user}) {
+    $sl->log("Ignoring CLIENTBATTLESTATUS command (client \"$user\" out of current battle)",1);
+    return 0;
+  }
+  $self->{battle}{users}{$user}{battleStatus}=$self->unmarshallBattleStatus($battleStatus);
+  $self->{battle}{users}{$user}{color}=$self->unmarshallColor($color);
   return 1;
 }
 
 sub disableUnitsHandler {
   my ($self,undef,@units)=@_;
-  my %conf=%{$self->{conf}};
-  my $sl=$conf{simpleLog};
-  if(exists $self->{battle}->{disabledUnits}) {
-    push(@{$self->{battle}->{disabledUnits}},@units);
-  }else{
+  my $sl=$self->{conf}{simpleLog};
+  if(! exists $self->{battle}{disabledUnits}) {
     $sl->log("Ignoring DISABLEUNITS command (currently out of any battle)",1);
     return 0;
   }
+  push(@{$self->{battle}{disabledUnits}},@units);
   return 1;
 }
 
 sub enableUnitsHandler {
   my ($self,undef,@units)=@_;
-  my %conf=%{$self->{conf}};
-  my $sl=$conf{simpleLog};
-  if(exists $self->{battle}->{disabledUnits}) {
-    my @disabledUnits=@{$self->{battle}->{disabledUnits}};
-    foreach my $u (@units) {
-      my $unitIndex = aindex(@disabledUnits,$u);
-      if($unitIndex != -1) {
-        splice(@disabledUnits,$unitIndex,1);
-      }else{
-        $sl->log("Ignoring ENABLEUNITS for unit $u (already unabled)",1);
-      }
-    }
-    $self->{battle}->{disabledUnits}=\@disabledUnits;
-  }else{
+  my $sl=$self->{conf}{simpleLog};
+  if(! exists $self->{battle}{disabledUnits}) {
     $sl->log("Ignoring ENABLEUNITS command (currently out of any battle)",1);
     return 0;
   }
+  my @disabledUnits=@{$self->{battle}{disabledUnits}};
+  foreach my $u (@units) {
+    my $unitIndex = aindex(@disabledUnits,$u);
+    if($unitIndex != -1) {
+      splice(@disabledUnits,$unitIndex,1);
+    }else{
+      $sl->log("Ignoring ENABLEUNITS for unit $u (already unabled)",1);
+    }
+  }
+  $self->{battle}{disabledUnits}=\@disabledUnits;
   return 1;
 }
 
 sub enableAllUnitsHandler  {
   my ($self,undef)=@_;
-  my %conf=%{$self->{conf}};
-  my $sl=$conf{simpleLog};
-  if(exists $self->{battle}->{disabledUnits}) {
-    $self->{battle}->{disabledUnits}=[];
-  }else{
+  my $sl=$self->{conf}{simpleLog};
+  if(! exists $self->{battle}{disabledUnits}) {
     $sl->log("Ignoring ENABLEALLUNITS command (currently out of any battle)",1);
     return 0;
   }
+  $self->{battle}{disabledUnits}=[];
   return 1;
 }
 
 sub addBotHandler {
   my ($self,undef,$battleId,$name,$owner,$battleStatus,$color,$aiDll)=@_;
-  my %conf=%{$self->{conf}};
-  my $sl=$conf{simpleLog};
-  if(exists $self->{battle}->{battleId}) {
-    if($battleId == $self->{battle}->{battleId}) {
-      push(@{$self->{battle}->{botList}},$name);
-      $self->{battle}->{bots}->{$name} = { owner => $owner,
-                                           battleStatus => $self->unmarshallBattleStatus($battleStatus),
-                                           color => $self->unmarshallColor($color),
-                                           aiDll => $aiDll };
-    }else{
-      $sl->log("Ignoring ADDBOT command (wrong battle ID:\"$battleId\")",1);
-      return 0;
-    }
-  }else{
+  my $sl=$self->{conf}{simpleLog};
+  if(! exists $self->{battle}{battleId}) {
     $sl->log("Ignoring ADDBOT command (currently out of any battle)",1);
     return 0;
   }
+  if($battleId != $self->{battle}{battleId}) {
+    $sl->log("Ignoring ADDBOT command (wrong battle ID:\"$battleId\")",1);
+    return 0;
+  }
+  if(! exists $self->{users}{$owner}) {
+    $sl->log("Ignoring ADDBOT command (unknown owner:\"$owner\")",1);
+    return 0;
+  }
+  push(@{$self->{battle}{botList}},$name);
+  $self->{battle}{bots}{$name} = { owner => $owner,
+                                   battleStatus => $self->unmarshallBattleStatus($battleStatus),
+                                   color => $self->unmarshallColor($color),
+                                   aiDll => $aiDll };
   return 1;
 }
 
 sub removeBotHandler {
   my ($self,undef,$battleId,$name)=@_;
-  my %conf=%{$self->{conf}};
-  my $sl=$conf{simpleLog};
-  if(exists $self->{battle}->{battleId}) {
-    if($battleId == $self->{battle}->{battleId}) {
-      my @botList=@{$self->{battle}->{botList}};
-      my $botIndex=aindex(@botList,$name);
-      if($botIndex != -1) {
-        splice(@botList,$botIndex,1);
-        $self->{battle}->{botList}=\@botList;
-      }else{
-        $sl->log("Ignoring REMOVEBOT command (unknown bot \"$name\")",1);
-        return 0;
-      }
-      delete $self->{battle}->{bots}->{$name};
-    }else{
-      $sl->log("Ignoring REMOVEBOT command (wrong battle ID:\"$battleId\")",1);
-      return 0;
-    }
-  }else{
+  my $sl=$self->{conf}{simpleLog};
+  if(! exists $self->{battle}{battleId}) {
     $sl->log("Ignoring REMOVEBOT command (currently out of any battle)",1);
     return 0;
   }
+  if($battleId != $self->{battle}{battleId}) {
+    $sl->log("Ignoring REMOVEBOT command (wrong battle ID:\"$battleId\")",1);
+    return 0;
+  }
+  my @botList=@{$self->{battle}{botList}};
+  my $botIndex=aindex(@botList,$name);
+  if($botIndex == -1) {
+    $sl->log("Ignoring REMOVEBOT command (unknown bot \"$name\")",1);
+    return 0;
+  }
+  splice(@botList,$botIndex,1);
+  $self->{battle}{botList}=\@botList;
+  delete $self->{battle}{bots}{$name};
   return 1;
 }
 
 sub updateBotHandler {
   my ($self,undef,$battleId,$name,$battleStatus,$color)=@_;
-  my %conf=%{$self->{conf}};
-  my $sl=$conf{simpleLog};
-  if(exists $self->{battle}->{battleId}) {
-    if($battleId == $self->{battle}->{battleId}) {
-      $self->{battle}->{bots}->{$name}->{battleStatus}=$self->unmarshallBattleStatus($battleStatus);
-      $self->{battle}->{bots}->{$name}->{color}=$self->unmarshallColor($color);
-    }else{
-      $sl->log("Ignoring UPDATEBOT command (wrong battle ID:\"$battleId\")",1);
-      return 0;
-    }
-  }else{
+  my $sl=$self->{conf}{simpleLog};
+  if(! exists $self->{battle}{battleId}) {
     $sl->log("Ignoring UPDATEBOT command (currently out of any battle)",1);
     return 0;
   }
+  if($battleId != $self->{battle}{battleId}) {
+    $sl->log("Ignoring UPDATEBOT command (wrong battle ID:\"$battleId\")",1);
+    return 0;
+  }
+  $self->{battle}{bots}{$name}{battleStatus}=$self->unmarshallBattleStatus($battleStatus);
+  $self->{battle}{bots}{$name}{color}=$self->unmarshallColor($color);
   return 1;
 }
 
 sub addStartRectHandler {
   my ($self,undef,$id,$left,$top,$right,$bottom)=@_;
   $self->checkIntParams('ADDSTARTRECT',[qw/id left top right bottom/],[\$id,\$left,\$top,\$right,\$bottom]);
-  my %conf=%{$self->{conf}};
-  my $sl=$conf{simpleLog};
-  if(exists $self->{battle}->{startRects}) {
-    $self->{battle}->{startRects}->{$id}={ left => $left, top => $top, right => $right, bottom => $bottom };
-  }else{
+  my $sl=$self->{conf}{simpleLog};
+  if(! exists $self->{battle}{startRects}) {
     $sl->log("Ignoring ADDSTARTRECT command (currently out of any battle)",1);
     return 0;
   }
+  $self->{battle}{startRects}{$id}={ left => $left, top => $top, right => $right, bottom => $bottom };
   return 1;
 }
 
 sub removeStartRectHandler {
   my ($self,undef,$id)=@_;
-  delete $self->{battle}->{startRects}->{$id};
+  delete $self->{battle}{startRects}{$id};
   return 1;
 }
 
 sub setScriptTagsHandler {
   my ($self,undef,@scriptTags)=@_;
-  my %conf=%{$self->{conf}};
-  my $sl=$conf{simpleLog};
-  if(exists $self->{battle}->{scriptTags}) {
-    foreach my $tagValue (@scriptTags) {
-      if($tagValue =~ /^\s*([^=]*[^=\s])\s*=\s*(.*[^\s])\s*$/) {
-        $self->{battle}->{scriptTags}->{$1}=$2;
-      }else{
-        $sl->log("Ignoring invalid script tag in SETSCRIPTTAGS \"$tagValue\"",2);
-      }
-    }
-  }else{
+  my $sl=$self->{conf}{simpleLog};
+  if(! exists $self->{battle}{scriptTags}) {
     $sl->log("Ignoring SETSCRIPTTAGS command (currently out of any battle)",1);
     return 0;
+  }
+  foreach my $tagValue (@scriptTags) {
+    if($tagValue =~ /^\s*([^=]*[^=\s])\s*=\s*(.*[^\s])\s*$/) {
+      $self->{battle}{scriptTags}{$1}=$2;
+    }else{
+      $sl->log("Ignoring invalid script tag in SETSCRIPTTAGS \"$tagValue\"",2);
+    }
   }
   return 1;
 }
 
 sub removeScriptTagsHandler {
   my ($self,undef,@scriptTags)=@_;
-  my %conf=%{$self->{conf}};
-  my $sl=$conf{simpleLog};
-  if(exists $self->{battle}->{scriptTags}) {
-    foreach my $tag (@scriptTags) {
-      if(exists $self->{battle}->{scriptTags}->{$tag}) {
-        delete $self->{battle}->{scriptTags}->{$tag};
-      }else{
-        $sl->log("Ignoring unknown script tag in REMOVESCRIPTTAGS \"$tag\"",2);
-      }
-    }
-  }else{
+  my $sl=$self->{conf}{simpleLog};
+  if(! exists $self->{battle}{scriptTags}) {
     $sl->log("Ignoring REMOVESCRIPTTAGS command (currently out of any battle)",1);
     return 0;
+  }
+  foreach my $tag (@scriptTags) {
+    if(exists $self->{battle}{scriptTags}{$tag}) {
+      delete $self->{battle}{scriptTags}{$tag};
+    }else{
+      $sl->log("Ignoring unknown script tag in REMOVESCRIPTTAGS \"$tag\"",2);
+    }
   }
   return 1;
 }
