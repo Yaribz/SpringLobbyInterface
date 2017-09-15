@@ -60,3 +60,4 @@ SpringLobbyInterface.pm:
 0.22: new optional constructor parameter "inconsistencyHandler" containing a function to be called when inconsistent data sent by lobby server is detected
       improve detection of inconsistent data sent by lobby server
       minor code refactoring
+0.23: detect more lobby server inconsistencies

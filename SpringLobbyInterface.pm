@@ -23,14 +23,19 @@ use strict;
 
 use IO::Socket::INET;
 use Digest::MD5 "md5_base64";
-use List::Util "shuffle";
+use List::Util qw'first shuffle';
 use Storable "dclone";
 
 use SimpleLog;
 
+sub any (&@) { my $c = shift; return defined first {&$c} @_; }
+sub all (&@) { my $c = shift; return ! defined first {! &$c} @_; }
+sub none (&@) { my $c = shift; return ! defined first {&$c} @_; }
+sub notall (&@) { my $c = shift; return defined first {! &$c} @_; }
+
 # Internal data ###############################################################
 
-my $moduleVersion='0.22';
+my $moduleVersion='0.23';
 
 my %sentenceStartPosClient = (
   REQUESTUPDATEFILE => 1,
@@ -600,7 +605,7 @@ sub generateStartData {
     my $user=$battleData{userList}->[$userIndex];
     $myPlayerNum=$userIndex if($user eq $self->{login});
     my $p_battleStatus=$battleData{users}{$user}{battleStatus};
-    if($p_battleStatus->{mode}) {
+    if(defined $p_battleStatus && $p_battleStatus->{mode}) {
       if($p_battleStatus->{side} > $#{$p_sides}) {
         $sl->log("Side number of player \"$user\" is too big ($p_battleStatus->{side}), using max value for current MOD instead ($#{$p_sides})",2);
         $p_battleStatus->{side}=$#{$p_sides};
@@ -727,14 +732,13 @@ sub generateStartData {
 
   for my $userIndex (0..$#{$battleData{userList}}) {
     my $user=$battleData{userList}->[$userIndex];
-    my $p_battleStatus=$battleData{users}{$user}{battleStatus};
-    my $team=$teamsMap{$p_battleStatus->{id}};
+    my $p_battleStatus=$battleData{users}{$user}{battleStatus}//{mode => 0};
     push(@startData,"  [PLAYER$userIndex]");
     push(@startData,"  {");
     push(@startData,"    Name=$user;");
     push(@startData,"    Password=$battleData{users}{$user}{scriptPass};") if(defined $battleData{users}{$user}{scriptPass});
     push(@startData,"    Spectator=".(1 - $p_battleStatus->{mode}).";");
-    push(@startData,"    Team=$team;") if($p_battleStatus->{mode});
+    push(@startData,"    Team=$teamsMap{$p_battleStatus->{id}};") if($p_battleStatus->{mode});
     if(exists $self->{users}{$user}) {
       my $playerAccountId=$self->{users}{$user}{accountId};
       push(@startData,"    CountryCode=$self->{users}{$user}{country};");
@@ -1224,7 +1228,10 @@ sub addUserHandler {
   $accountId=0 unless(defined $accountId);
   $self->checkIntParams('ADDUSER',[qw/cpu accountId/],[\$cpu,\$accountId]);
   my $sl=$self->{conf}{simpleLog};
-  $sl->log("Duplicate ADDUSER command for user \"$user\")",2) if(exists $self->{users}{$user});
+  if(exists $self->{users}{$user}) {
+    $sl->log("Ignoring duplicate ADDUSER command for user \"$user\"",2);
+    return 0;
+  }
   $self->{users}{$user} = { country => $country,
                             cpu => $cpu,
                             accountId => $accountId,
@@ -1389,6 +1396,10 @@ sub joinedBattleHandler {
   }
   if(! exists $self->{users}{$user}) {
     $sl->log("Ignoring JOINEDBATTLE command (unknown user:\"$user\")",1);
+    return 0;
+  }
+  if(any {$user eq $_} @{$self->{battles}{$battleId}{userList}}) {
+    $sl->log("Ignoring JOINEDBATTLE command (user already in battle:\"$user\")",1);
     return 0;
   }
   push(@{$self->{battles}{$battleId}{userList}},$user);
