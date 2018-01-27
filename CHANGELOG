@@ -61,3 +61,4 @@ SpringLobbyInterface.pm:
       improve detection of inconsistent data sent by lobby server
       minor code refactoring
 0.23: detect more lobby server inconsistencies
+0.24: integer param checks are now also used to detect lobby server inconsistencies

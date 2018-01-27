@@ -35,7 +35,7 @@ sub notall (&@) { my $c = shift; return defined first {! &$c} @_; }
 
 # Internal data ###############################################################
 
-my $moduleVersion='0.23';
+my $moduleVersion='0.24';
 
 my %sentenceStartPosClient = (
   REQUESTUPDATEFILE => 1,
@@ -1225,8 +1225,8 @@ sub acceptedHandler {
 
 sub addUserHandler {
   my ($self,undef,$user,$country,$cpu,$accountId)=@_;
-  $accountId=0 unless(defined $accountId);
-  $self->checkIntParams('ADDUSER',[qw/cpu accountId/],[\$cpu,\$accountId]);
+  $accountId=0 unless(defined $accountId && $accountId ne 'None');
+  my $r_checkParamsRes=$self->checkIntParams('ADDUSER',[qw/cpu accountId/],[\$cpu,\$accountId]);
   my $sl=$self->{conf}{simpleLog};
   if(exists $self->{users}{$user}) {
     $sl->log("Ignoring duplicate ADDUSER command for user \"$user\"",2);
@@ -1242,7 +1242,7 @@ sub addUserHandler {
                                         access => 0,
                                         bot => 0 } };
   $self->{accounts}{$accountId}=$user if($accountId);
-  return 1;
+  return %{$r_checkParamsRes} ? 0 : 1;
 }
 
 sub removeUserHandler {
@@ -1346,7 +1346,7 @@ sub leaveChannelHandler {
 
 sub battleOpenedHandler {
   my ($self,undef,$battleId,$type,$natType,$founder,$ip,$port,$maxPlayers,$passworded,$rank,$mapHash,@otherParams)=@_;
-  $self->checkIntParams('BATTLEOPENED',[qw/battleId type natType port maxPlayers passworded rank mapHash/],[\$battleId,\$type,\$natType,\$port,\$maxPlayers,\$passworded,\$rank,\$mapHash]);
+  my $r_checkParamsRes=$self->checkIntParams('BATTLEOPENED',[qw/battleId type natType port maxPlayers passworded rank mapHash/],[\$battleId,\$type,\$natType,\$port,\$maxPlayers,\$passworded,\$rank,\$mapHash]);
   my $sl=$self->{conf}{simpleLog};
   if(! exists $self->{users}{$founder}) {
     $sl->log("Ignoring BATTLEOPENED command (unknown founder:\"$founder\")",1);
@@ -1377,7 +1377,7 @@ sub battleOpenedHandler {
                                   userList => [$founder],
                                   nbSpec => 0,
                                   locked => 0};
-  return 1;
+  return %{$r_checkParamsRes} ? 0 : 1;
 }
 
 sub battleClosedHandler {
@@ -1433,7 +1433,7 @@ sub leftBattleHandler {
 
 sub updateBattleInfoHandler {
   my ($self,undef,$battleId,$nbSpec,$locked,$mapHash,$map)=@_;
-  $self->checkIntParams('UPDATEBATTLEINFO',[qw/battleId nbSpec locked mapHash/],[\$battleId,\$nbSpec,\$locked,\$mapHash]);
+  my $r_checkParamsRes=$self->checkIntParams('UPDATEBATTLEINFO',[qw/battleId nbSpec locked mapHash/],[\$battleId,\$nbSpec,\$locked,\$mapHash]);
   my $sl=$self->{conf}{simpleLog};
   if(! exists $self->{battles}{$battleId}) {
     $sl->log("Ignoring UPDATEBATTLEINFO command (unknown battle:\"$battleId\")",1);
@@ -1443,7 +1443,7 @@ sub updateBattleInfoHandler {
   $self->{battles}{$battleId}{locked}=$locked;
   $self->{battles}{$battleId}{mapHash}=$mapHash;
   $self->{battles}{$battleId}{map}=$map;
-  return 1;
+  return %{$r_checkParamsRes} ? 0 : 1;
 }
 
 sub openBattleHook {
@@ -1455,7 +1455,7 @@ sub openBattleHook {
 
 sub openBattleHandler {
   my ($self,undef,$battleId)=@_;
-  $self->checkIntParams('OPENBATTLE',['battleId'],[\$battleId]);
+  my $r_checkParamsRes=$self->checkIntParams('OPENBATTLE',['battleId'],[\$battleId]);
   my $sl=$self->{conf}{simpleLog};
   if(! exists $self->{battles}{$battleId}) {
     $sl->log("Ignoring OPENBATTLE command (unknown battle:\"$battleId\")",1);
@@ -1474,7 +1474,7 @@ sub openBattleHandler {
   foreach my $user (@{$self->{battles}{$battleId}{userList}}) {
     $self->{battle}{users}{$user}={battleStatus => undef, color => undef, ip => undef, port => undef};
   }
-  return 1;
+  return %{$r_checkParamsRes} ? 0 : 1;
 }
 
 sub joinBattleHook {
@@ -1519,7 +1519,7 @@ sub joinBattleRequestHandler {
 
 sub clientIpPortHandler {
   my ($self,undef,$user,$ip,$port)=@_;
-  $self->checkIntParams('CLIENTIPPORT',['port'],[\$port]);
+  my $r_checkParamsRes=$self->checkIntParams('CLIENTIPPORT',['port'],[\$port]);
   my $sl=$self->{conf}{simpleLog};
   if(! exists $self->{battle}{users}) {
     $sl->log("Ignoring CLIENTIPPORT command (currently out of any battle)",1);
@@ -1531,7 +1531,7 @@ sub clientIpPortHandler {
   }
   $self->{battle}{users}{$user}{ip}=$ip;
   $self->{battle}{users}{$user}{port}=$port;
-  return 1;
+  return %{$r_checkParamsRes} ? 0 : 1;
 }
 
 sub clientBattleStatusHandler {
@@ -1656,14 +1656,14 @@ sub updateBotHandler {
 
 sub addStartRectHandler {
   my ($self,undef,$id,$left,$top,$right,$bottom)=@_;
-  $self->checkIntParams('ADDSTARTRECT',[qw/id left top right bottom/],[\$id,\$left,\$top,\$right,\$bottom]);
+  my $r_checkParamsRes=$self->checkIntParams('ADDSTARTRECT',[qw/id left top right bottom/],[\$id,\$left,\$top,\$right,\$bottom]);
   my $sl=$self->{conf}{simpleLog};
   if(! exists $self->{battle}{startRects}) {
     $sl->log("Ignoring ADDSTARTRECT command (currently out of any battle)",1);
     return 0;
   }
   $self->{battle}{startRects}{$id}={ left => $left, top => $top, right => $right, bottom => $bottom };
-  return 1;
+  return %{$r_checkParamsRes} ? 0 : 1;
 }
 
 sub removeStartRectHandler {
