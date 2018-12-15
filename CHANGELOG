@@ -62,3 +62,4 @@ SpringLobbyInterface.pm:
       minor code refactoring
 0.23: detect more lobby server inconsistencies
 0.24: integer param checks are now also used to detect lobby server inconsistencies
+0.25: missing integer parameters in commands received from lobby server are now correctly detected

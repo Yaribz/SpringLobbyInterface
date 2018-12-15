@@ -35,7 +35,7 @@ sub notall (&@) { my $c = shift; return defined first {! &$c} @_; }
 
 # Internal data ###############################################################
 
-my $moduleVersion='0.24';
+my $moduleVersion='0.25';
 
 my %sentenceStartPosClient = (
   REQUESTUPDATEFILE => 1,
@@ -1202,6 +1202,11 @@ sub checkIntParams {
   }
   my %invalidParams;
   for my $i (0..$#{$p_paramNames}) {
+    if(! defined ${$p_paramPointers->[$i]}) {
+      $invalidParams{$p_paramNames->[$i]}=${$p_paramPointers->[$i]};
+      $sl->log("Found undefined $p_paramNames->[$i] parameter value (should be integer) in lobby command $commandName",2);
+      ${$p_paramPointers->[$i]}=0;
+    }
     if(${$p_paramPointers->[$i]} !~ /^-?\d+$/) {
       $invalidParams{$p_paramNames->[$i]}=${$p_paramPointers->[$i]};
       $sl->log("Found invalid $p_paramNames->[$i] parameter value \"${$p_paramPointers->[$i]}\" (should be integer) in lobby command $commandName",2);
