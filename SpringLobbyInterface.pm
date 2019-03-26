@@ -1,7 +1,7 @@
 # Object-oriented Perl module implementing a callback-based interface to
 # communicate with SpringRTS lobby server.
 #
-# Copyright (C) 2008-2017  Yann Riou <yaribzh@gmail.com>
+# Copyright (C) 2008-2019  Yann Riou <yaribzh@gmail.com>
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -35,7 +35,7 @@ sub notall (&@) { my $c = shift; return defined first {! &$c} @_; }
 
 # Internal data ###############################################################
 
-my $moduleVersion='0.25';
+my $moduleVersion='0.26';
 
 my %sentenceStartPosClient = (
   REQUESTUPDATEFILE => 1,
@@ -45,8 +45,8 @@ my %sentenceStartPosClient = (
   SAY => 2,
   SAYEX => 2,
   SAYPRIVATE => 2,
+  SAYPRIVATEEX => 2,
   OPENBATTLE => 9,
-  OPENBATTLEEX => 11,
   UPDATEBATTLEINFO => 4,
   SAYBATTLE => 1,
   SAYBATTLEPRIVATE => 2,
@@ -66,6 +66,7 @@ my %sentenceStartPosServer = (
   OFFERFILE => 2,
   SERVERMSG => 1,
   SERVERMSGBOX => 1,
+  ADDUSER => 4,
   JOINFAILED => 2,
   MUTELIST => 1,
   CHANNELTOPIC => 4,
@@ -75,9 +76,10 @@ my %sentenceStartPosServer = (
   SAID => 3,
   SAIDEX => 3,
   SAYPRIVATE => 2,
+  SAYPRIVATEEX => 2,
   SAIDPRIVATE => 2,
+  SAIDPRIVATEEX => 2,
   BATTLEOPENED => 11,
-  BATTLEOPENEDEX => 13,
   JOINBATTLEFAILED => 1,
   OPENBATTLEFAILED => 1,
   UPDATEBATTLEINFO => 5,
@@ -92,12 +94,12 @@ my %sentenceStartPosServer = (
   CHANNEL => 3
 );
 
-my @tabWorkaroundCommands = qw/CHANNELTOPIC SAID SAIDEX SAIDPRIVATE SAIDBATTLE SAIDBATTLEEX SAYPRIVATE/;
+my @tabWorkaroundCommands = qw/CHANNELTOPIC SAID SAIDEX SAIDPRIVATE SAIDPRIVATEEX SAIDBATTLE SAIDBATTLEEX SAYPRIVATE SAYPRIVATEEX/;
 
 my %commandHooks = (
+  LOGIN => \&loginHook,
   LEAVE => \&leaveChannelHandler,
   OPENBATTLE => \&openBattleHook,
-  OPENBATTLEEX => \&openBattleHook,
   JOINBATTLE => \&joinBattleHook,
   DISABLEUNITS => \&disableUnitsHandler,
   ENABLEUNITS => \&enableUnitsHandler,
@@ -114,13 +116,13 @@ my %commandHandlers = (
   ADDUSER => \&addUserHandler,
   REMOVEUSER => \&removeUserHandler,
   JOIN => \&joinHandler,
+  CHANNELTOPIC => \&channelTopicHandler,
   CLIENTS => \&clientsHandler,
   JOINED => \&joinedHandler,
   LEFT => \&leftHandler,
   FORCELEAVECHANNEL => \&leaveChannelHandler,
   OPENBATTLE => \&openBattleHandler,
   BATTLEOPENED => \&battleOpenedHandler,
-  BATTLEOPENEDEX => \&battleOpenedHandler,
   BATTLECLOSED => \&battleClosedHandler,
   JOINBATTLE => \&joinBattleHandler,
   JOINEDBATTLE => \&joinedBattleHandler,
@@ -170,6 +172,7 @@ sub new {
   my $self = {
     conf => $p_conf,
     lobbySock => undef,
+    compatFlags => {},
     readBuffer => '',
     login => undef,
     defaultSpringVersion => '',
@@ -227,105 +230,6 @@ sub getBattle {
 sub getRunningBattle {
   my $self = shift;
   return dclone($self->{runningBattle});
-}
-
-# Debugging method ############################################################
-
-sub dumpState {
-  my $self=shift;
-  my %conf=%{$self->{conf}};
-  my $sl=$conf{simpleLog};
-  $sl->log("-------------------------- DUMPING STATE ----------------------------",5);
-  $sl->log("USERS:",5);
-  my %users=%{$self->{users}};
-  foreach my $u (keys %users) {
-    my $userString="  $u (CPU:$users{$u}{cpu},country:$users{$u}{country}";
-    foreach my $status (keys %{$users{$u}{status}}) {
-      $userString.=",$status:$users{$u}{status}{$status}";
-    }
-    $sl->log($userString.")",5);
-  }
-  $sl->log("CHANNELS:",5);
-  my %chans=%{$self->{channels}};
-  foreach my $c (keys %chans) {
-    $sl->log("  $c (".join(",",keys %{$chans{$c}}).")",5);
-  }
-  $sl->log("BATTLES:",5);
-  my %battles=%{$self->{battles}};
-  foreach my $b (keys %battles) {
-    my $bString="  $b (";
-    my $needComa=0;
-    foreach my $k (keys %{$battles{$b}}) {
-      next if($k eq "userList");
-      $bString.=("," x $needComa)."$k:$battles{$b}{$k}";
-      $needComa=1;
-    }
-    $bString.=",userList=";
-    my @userList=@{$battles{$b}{userList}};
-    for my $i (0..$#userList) {
-      $bString.=" $userList[$i]";
-    }
-    $sl->log($bString.")",5);
-  }
-  $sl->log("CURRENT BATTLE:",5);
-  my %battle=%{$self->{battle}};
-  if(%battle) {
-    $sl->log("  battle ID:$battle{battleId}",5);
-    $sl->log("  founder:$battle{founder}",5);
-    $sl->log("  modHash:$battle{modHash}",5);
-    $sl->log("  users:",5);
-    foreach my $u (keys %{$battle{users}}) {
-      $sl->log("    $u:",5);
-      my $statusString="      battleStatus: ";
-      foreach my $us (keys %{$battle{users}{$u}{battleStatus}}) {
-        $statusString.="$us=$battle{users}{$u}{battleStatus}{$us},";
-      }
-      $sl->log($statusString,5);
-      my $colorString="      color: ";
-      foreach my $col (keys %{$battle{users}{$u}{color}}) {
-        $colorString.="$col=$battle{users}{$u}{color}{$col},";
-      }
-      $sl->log($colorString,5);
-      $sl->log("      ip:$battle{users}{$u}{ip}",5) if(defined $battle{users}{$u}{ip});
-      $sl->log("      port:$battle{users}{$u}{port}",5) if(defined $battle{users}{$u}{port});
-    }
-
-    $sl->log("  bots:",5);
-    foreach my $b (keys %{$battle{bots}}) {
-      $sl->log("    $b:",5);
-      $sl->log("      owner:$battle{bots}{$b}{owner}",5);
-      $sl->log("      aiDll:$battle{bots}{$b}{aiDll}",5);
-      my $statusString="     battleStatus: ";
-      foreach my $bs (keys %{$battle{bots}{$b}{battleStatus}}) {
-        $statusString.="$bs=$battle{bots}{$b}{battleStatus}{$bs},";
-      }
-      $sl->log($statusString,5);
-      my $colorString="      color: ";
-      foreach my $col (keys %{$battle{bots}{$b}{color}}) {
-        $colorString.="$col=$battle{bots}{$b}{color}{$col},";
-      }
-      $sl->log($colorString,5);
-    }
-    my $disString="  disabled units:";
-    foreach my $du (@{$battle{disabledUnits}}) {
-      $disString.="$du,";
-    }
-    $sl->log($disString,5);
-    $sl->log("  start rects:",5);
-    foreach my $id (keys %{$battle{startRects}}) {
-      my $srString="    $id: ";
-      foreach my $point (keys %{$battle{startRects}{$id}}) {
-        $srString.="$point=$battle{startRects}{$id}{$point},";
-      }
-      $sl->log($srString,5);
-    }
-    my $stString="  script tags: ";
-    foreach my $tag (keys %{$battle{scriptTags}}) {
-      $stString.="$tag=$battle{scriptTags}{$tag},";
-    }
-    $sl->log($stString,5);
-  }
-  $sl->log("-------------------------- END OF DUMP ----------------------------",5);
 }
 
 # Marshallers/unmarshallers ###################################################
@@ -975,6 +879,7 @@ sub disconnect {
     undef $self->{lobbySock};
   }
   $self->{login}=undef;
+  $self->{compatFlags}={};
   $self->{defaultSpringVersion}='';
   $self->{users}={};
   $self->{accounts}={};
@@ -1222,6 +1127,15 @@ sub tasserverHandler {
   return 1;
 }
 
+sub loginHook {
+  my ($self,$flagString)=($_[0],$_[8]);
+  if(defined $flagString) {
+    my @flags=split(' ',$flagString);
+    @{$self->{compatFlags}}{@flags}=(1) x @flags;
+    $sentenceStartPosServer{CHANNELTOPIC}=3 if(exists $self->{compatFlags}{t});
+  }
+}
+
 sub acceptedHandler {
   my ($self,undef,$login)=@_;
   $self->{login}=$login;
@@ -1229,17 +1143,24 @@ sub acceptedHandler {
 }
 
 sub addUserHandler {
-  my ($self,undef,$user,$country,$cpu,$accountId)=@_;
+  my ($self,undef,$user,$country,$param3,$param4)=@_;
+  my ($accountId,$lobbyClient);
+  if(exists $self->{compatFlags}{l}) {
+    ($accountId,$lobbyClient)=($param3,$param4);
+  }else{
+    $accountId=$param4;
+  }
   $accountId=0 unless(defined $accountId && $accountId ne 'None');
-  my $r_checkParamsRes=$self->checkIntParams('ADDUSER',[qw/cpu accountId/],[\$cpu,\$accountId]);
+  $lobbyClient//='';
+  my $r_checkParamsRes=$self->checkIntParams('ADDUSER',['accountId'],[\$accountId]);
   my $sl=$self->{conf}{simpleLog};
   if(exists $self->{users}{$user}) {
     $sl->log("Ignoring duplicate ADDUSER command for user \"$user\"",2);
     return 0;
   }
   $self->{users}{$user} = { country => $country,
-                            cpu => $cpu,
                             accountId => $accountId,
+                            lobbyClient => $lobbyClient,
                             ip => undef,
                             status => { inGame => 0,
                                         rank => 0,
@@ -1284,9 +1205,22 @@ sub clientStatusHandler {
   return 1;
 }
 
+sub channelTopicHandler {
+  my ($self,undef,$chan,$user,$topic)=@_;
+  $topic=$_[5] unless(exists $self->{compatFlags}{t});
+  $topic//='';
+  if(! exists $self->{channels}{$chan}) {
+    $self->{conf}{simpleLog}->log("Ignoring CHANNELTOPIC command (non joined channel:\"$chan\")",1);
+    return 0;
+  }
+  $self->{channels}{$chan}{topic}={author => $user,
+                                   content => $topic};
+  return 1;
+}
+
 sub joinHandler {
   my ($self,undef,$channel)=@_;
-  $self->{channels}{$channel}={};
+  $self->{channels}{$channel}={topic => {}, users => {}};
   return 1;
 }
 
@@ -1301,7 +1235,7 @@ sub clientsHandler {
   my @unknownUsers;
   foreach my $user (@users) {
     if(exists $self->{users}{$user}) {
-      $self->{channels}{$channel}{$user}=1;
+      $self->{channels}{$channel}{users}{$user}=1;
     }else{
       push(@unknownUsers,$user);
     }
@@ -1324,7 +1258,7 @@ sub joinedHandler {
     $sl->log("Ignoring JOINED command (unknown user:\"$user\")",1);
     return 0;
   }
-  $self->{channels}{$channel}{$user}=1;
+  $self->{channels}{$channel}{users}{$user}=1;
   return 1;
 }
 
@@ -1339,7 +1273,7 @@ sub leftHandler {
     $sl->log("Ignoring LEFT command (unknown user:\"$user\")",1);
     return 0;
   }
-  delete $self->{channels}{$channel}{$user};
+  delete $self->{channels}{$channel}{users}{$user};
   return 1;
 }
 
