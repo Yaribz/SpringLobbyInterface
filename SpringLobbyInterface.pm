@@ -35,7 +35,7 @@ sub notall (&@) { my $c = shift; return defined first {! &$c} @_; }
 
 # Internal data ###############################################################
 
-my $moduleVersion='0.26';
+my $moduleVersion='0.27';
 
 my %sentenceStartPosClient = (
   REQUESTUPDATEFILE => 1,
@@ -111,6 +111,7 @@ my %commandHooks = (
 my %commandHandlers = (
   TASSERVER => \&tasserverHandler,
   ACCEPTED => \&acceptedHandler,
+  OK => \&okHandler,
   CLIENTIPPORT => \&clientIpPortHandler,
   JOINBATTLEREQUEST => \&joinBattleRequestHandler,
   ADDUSER => \&addUserHandler,
@@ -141,6 +142,8 @@ my %commandHandlers = (
   SETSCRIPTTAGS => \&setScriptTagsHandler,
   REMOVESCRIPTTAGS => \&removeScriptTagsHandler
 );
+
+my $tlsAvailable=eval { require IO::Socket::SSL; 1; };
 
 # Constructor #################################################################
 
@@ -189,7 +192,8 @@ sub new {
     openBattleModHash => 0,
     password => '*',
     lastSndTs => 0,
-    lastRcvTs => 0
+    lastRcvTs => 0,
+    tlsCertifHash => undef
   };
 
   bless ($self, $class);
@@ -230,6 +234,10 @@ sub getBattle {
 sub getRunningBattle {
   my $self = shift;
   return dclone($self->{runningBattle});
+}
+
+sub isTlsAvailable {
+  return $tlsAvailable;
 }
 
 # Marshallers/unmarshallers ###################################################
@@ -895,6 +903,7 @@ sub disconnect {
   $self->{password}='*';
   $self->{lastSndTs}=0;
   $self->{lastRcvTs}=0;
+  $self->{tlsCertifHash}=undef;
 }
 
 sub sendCommand {
@@ -1124,6 +1133,31 @@ sub checkIntParams {
 sub tasserverHandler {
   my ($self,undef,undef,$defaultSpringVersion)=@_;
   $self->{defaultSpringVersion}=$defaultSpringVersion;
+  return 1;
+}
+
+sub okHandler {
+  my $self=shift;
+  my $sl=$self->{conf}{simpleLog};
+  if(! $tlsAvailable) {
+    $sl->log("Trying to activate TLS but no TLS module is available!",1);
+  }elsif(defined $self->{tlsCertifHash}) {
+    $sl->log("Trying to activate TLS but TLS is already activated!",1);
+  }else{
+    my $startSslResult=IO::Socket::SSL->start_SSL($self->{lobbySock}, SSL_verify_mode => IO::Socket::SSL::SSL_VERIFY_NONE());
+    if(! $startSslResult) {
+      $sl->log("Error during TLS handshake: $IO::Socket::SSL::SSL_ERROR",1);
+    }else{
+      my $tlsCertifHash=$self->{lobbySock}->get_fingerprint('sha256');
+      if($tlsCertifHash =~ /^sha256\$([\da-fA-F]+)$/) {
+        $self->{tlsCertifHash}=lc($1);
+        $sl->log('TLS enabled ('.($self->{lobbySock}->get_sslversion()).','.($self->{lobbySock}->get_cipher()).')',3);
+        $sl->log("TLS server certificate fingerpint (SHA-256): $self->{tlsCertifHash}",5);
+      }else{
+        $sl->log("Invalid TLS server certificate fingerprint: \"$tlsCertifHash\"",1);
+      }
+    }
+  }
   return 1;
 }
 

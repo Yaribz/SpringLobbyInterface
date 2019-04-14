@@ -68,3 +68,4 @@ SpringLobbyInterface.pm:
       improve handling of channel topic data
       remove obsolete support for OPENBATTLEEX/BATTLEOPENEDEX commands
       remove support for obsolete "cpu" client data
+0.27: add support for TLS
