@@ -1,7 +1,7 @@
 # Object-oriented Perl module implementing a callback-based interface to
 # communicate with SpringRTS lobby server.
 #
-# Copyright (C) 2008-2019  Yann Riou <yaribzh@gmail.com>
+# Copyright (C) 2008-2020  Yann Riou <yaribzh@gmail.com>
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -35,7 +35,7 @@ sub notall (&@) { my $c = shift; return defined first {! &$c} @_; }
 
 # Internal data ###############################################################
 
-my $moduleVersion='0.27';
+my $moduleVersion='0.28';
 
 my %sentenceStartPosClient = (
   REQUESTUPDATEFILE => 1,
@@ -178,7 +178,7 @@ sub new {
     compatFlags => {},
     readBuffer => '',
     login => undef,
-    defaultSpringVersion => '',
+    serverParams => {},
     users => {},
     accounts => {},
     channels => {},
@@ -888,7 +888,7 @@ sub disconnect {
   }
   $self->{login}=undef;
   $self->{compatFlags}={};
-  $self->{defaultSpringVersion}='';
+  $self->{serverParams}={};
   $self->{users}={};
   $self->{accounts}={};
   $self->{channels}={};
@@ -1131,9 +1131,23 @@ sub checkIntParams {
 }
 
 sub tasserverHandler {
-  my ($self,undef,undef,$defaultSpringVersion)=@_;
-  $self->{defaultSpringVersion}=$defaultSpringVersion;
-  return 1;
+  my ($self,undef,$protocolVersion,$defaultSpringVersion,$natHelperUdpPort,$serverMode)=@_;
+  my $sl=$self->{conf}{simpleLog};
+  my $r_checkParamsRes=$self->checkIntParams('TASSERVER',['natHelperUdpPort','serverMode'],[\$natHelperUdpPort,\$serverMode]);
+  $self->{serverParams}={protocolVersion => $protocolVersion,
+                         defaultSpringVersion => $defaultSpringVersion,
+                         natHelperUdpPort => $natHelperUdpPort,
+                         serverMode => $serverMode};
+  if($protocolVersion =~ /^(\d+\.\d+)/) {
+    if($1 > 0.36) {
+      $self->{compatFlags}{l}=1;
+      $self->{compatFlags}{t}=1;
+    }
+  }else{
+    $sl->log("Unknown format for lobby server protocol version: \"$protocolVersion\"",1);
+    return 0;
+  }
+  return %{$r_checkParamsRes} ? 0 : 1;
 }
 
 sub okHandler {
@@ -1328,7 +1342,7 @@ sub battleOpenedHandler {
   my ($engineName,$engineVersion,$map,$title,$mod);
   if($#otherParams < 4) {
     ($map,$title,$mod)=@otherParams;
-    ($engineName,$engineVersion)=('spring',$self->{defaultSpringVersion});
+    ($engineName,$engineVersion)=('spring',$self->{serverParams}{defaultSpringVersion});
     ($engineName,$engineVersion)=($1,$2) if($title =~ /^Incompatible \(([^ \)]+) +([^\)]+)\)/);
   }else{
     ($engineName,$engineVersion,$map,$title,$mod)=@otherParams;
