@@ -71,3 +71,4 @@ SpringLobbyInterface.pm:
 0.27: add support for TLS
 0.28: behaviors regarding compatibility flags are now adjusted according to lobby server protocol version
       all server-side settings (protocolVersion, defaultSpringVersion...) are now stored in a dedicated structure
+0.29: workaround for lobby server sending "unknown" protocolVersion value

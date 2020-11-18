@@ -35,7 +35,7 @@ sub notall (&@) { my $c = shift; return defined first {! &$c} @_; }
 
 # Internal data ###############################################################
 
-my $moduleVersion='0.28';
+my $moduleVersion='0.29';
 
 my %sentenceStartPosClient = (
   REQUESTUPDATEFILE => 1,
@@ -1143,6 +1143,8 @@ sub tasserverHandler {
       $self->{compatFlags}{l}=1;
       $self->{compatFlags}{t}=1;
     }
+  }elsif($protocolVersion eq 'unknown') {
+    $sl->log('The lobby server does NOT indicate the protocol version in use (compatibility with optional protocol extensions cannot be determined)',2);
   }else{
     $sl->log("Unknown format for lobby server protocol version: \"$protocolVersion\"",1);
     return 0;
