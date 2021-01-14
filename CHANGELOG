@@ -72,3 +72,4 @@ SpringLobbyInterface.pm:
 0.28: behaviors regarding compatibility flags are now adjusted according to lobby server protocol version
       all server-side settings (protocolVersion, defaultSpringVersion...) are now stored in a dedicated structure
 0.29: workaround for lobby server sending "unknown" protocolVersion value
+0.30: use graceful socket shutdown to disconnect from lobby server (fix quit messages sometimes ignored by lobby server)

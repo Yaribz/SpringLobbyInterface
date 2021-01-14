@@ -21,6 +21,7 @@ package SpringLobbyInterface;
 
 use strict;
 
+use IO::Select;
 use IO::Socket::INET;
 use Digest::MD5 "md5_base64";
 use List::Util qw'first shuffle';
@@ -35,7 +36,7 @@ sub notall (&@) { my $c = shift; return defined first {! &$c} @_; }
 
 # Internal data ###############################################################
 
-my $moduleVersion='0.29';
+my $moduleVersion='0.30';
 
 my %sentenceStartPosClient = (
   REQUESTUPDATEFILE => 1,
@@ -875,6 +876,23 @@ sub connect {
   return $self->{lobbySock};
 }
 
+sub gracefulSocketShutdown {
+  my $socket=shift;
+  shutdown($socket,1);
+  my $timeoutTime=Time::HiRes::time+5;
+  my $nbLingerPackets=0;
+  my $shutdownSel=IO::Select->new($socket);
+  while($nbLingerPackets<10) {
+    my $maxWait=$timeoutTime-Time::HiRes::time;
+    $maxWait=0 if($maxWait < 0);
+    last unless($shutdownSel->can_read($maxWait));
+    my $readLength=$socket->sysread(my $ignored,4096);
+    last unless($readLength);
+    $nbLingerPackets++ unless($maxWait);
+  }
+  close($socket);
+}
+
 sub disconnect {
   my $self = shift;
   my %conf=%{$self->{conf}};
@@ -883,7 +901,7 @@ sub disconnect {
   if(! ((defined $self->{lobbySock}) && $self->{lobbySock})) {
     $sl->log("Unable to disconnect from lobby server, already disconnected!",2);
   }else{
-    close($self->{lobbySock});
+    gracefulSocketShutdown($self->{lobbySock});
     undef $self->{lobbySock};
   }
   $self->{login}=undef;
