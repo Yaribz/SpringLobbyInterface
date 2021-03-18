@@ -73,3 +73,5 @@ SpringLobbyInterface.pm:
       all server-side settings (protocolVersion, defaultSpringVersion...) are now stored in a dedicated structure
 0.29: workaround for lobby server sending "unknown" protocolVersion value
 0.30: use graceful socket shutdown to disconnect from lobby server (fix quit messages sometimes ignored by lobby server)
+0.31: improve workarounds for lobby protocol limitations
+      support maximum number of teams and IDs allowed by engine (251)

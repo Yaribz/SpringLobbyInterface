@@ -1,7 +1,7 @@
 # Object-oriented Perl module implementing a callback-based interface to
 # communicate with SpringRTS lobby server.
 #
-# Copyright (C) 2008-2020  Yann Riou <yaribzh@gmail.com>
+# Copyright (C) 2008-2021  Yann Riou <yaribzh@gmail.com>
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -36,7 +36,7 @@ sub notall (&@) { my $c = shift; return defined first {! &$c} @_; }
 
 # Internal data ###############################################################
 
-my $moduleVersion='0.30';
+my $moduleVersion='0.31';
 
 my %sentenceStartPosClient = (
   REQUESTUPDATEFILE => 1,
@@ -106,7 +106,10 @@ my %commandHooks = (
   ENABLEUNITS => \&enableUnitsHandler,
   ENABLEALLUNITS => \&enableAllUnitsHandler,
   ADDSTARTRECT => \&addStartRectHandler,
-  REMOVESTARTRECT => \&removeStartRectHandler
+  REMOVESTARTRECT => \&removeStartRectHandler,
+  UPDATEBOT => \&updateBotHook,
+  FORCEALLYNO => \&forceAllyNoHook,
+  FORCETEAMNO => \&forceTeamNoHook
 );
 
 my %commandHandlers = (
@@ -270,7 +273,18 @@ sub unmarshallClientStatus {
 sub marshallBattleStatus {
   my ($self,$p_battleStatus)=@_;
   my %bs=%{$p_battleStatus};
-  return oct("0b0000".sprintf("%04b",$bs{side}).sprintf("%02b",$bs{sync})."0000".sprintf("%07b",$bs{bonus}).$bs{mode}.sprintf("%04b",$bs{team}).sprintf("%04b",$bs{id}).$bs{ready}."0");
+  my @workaroundStrings;
+  if($bs{team} > 15) {
+    push(@workaroundStrings,"team=$bs{team}");
+    $bs{team}%=16;
+  }
+  if($bs{id} > 15) {
+    push(@workaroundStrings,"id=$bs{id}");
+    $bs{id}%=16;
+  }
+  my $res=oct("0b0000".sprintf("%04b",$bs{side}).sprintf("%02b",$bs{sync})."0000".sprintf("%07b",$bs{bonus}).$bs{mode}.sprintf("%04b",$bs{team}).sprintf("%04b",$bs{id}).$bs{ready}."0");
+  $res.='('.join(';',@workaroundStrings).')' if(@workaroundStrings);
+  return $res;
 }
 
 sub unmarshallBattleStatus {
@@ -406,40 +420,6 @@ sub storeRunningBattle {
   }
 }
 
-sub remapRunningBattleIds {
-  my $self=shift;
-  my $nextRemappedId=0;
-  my $p_bUsers=$self->{runningBattle}{users};
-  my $p_bBots=$self->{runningBattle}{bots};
-  foreach my $player (keys %{$p_bUsers}) {
-    if(defined $p_bUsers->{$player}{battleStatus} && $p_bUsers->{$player}{battleStatus}{mode}) {
-      $nextRemappedId=$p_bUsers->{$player}{battleStatus}{id}+1 if($p_bUsers->{$player}{battleStatus}{id} >= $nextRemappedId);
-    }
-  }
-  foreach my $bot (keys %{$p_bBots}) {
-    $nextRemappedId=$p_bBots->{$bot}{battleStatus}{id}+1 if($p_bBots->{$bot}{battleStatus}{id} >= $nextRemappedId);
-  }
-  my %usedIds;
-  foreach my $player (keys %{$p_bUsers}) {
-    if(defined $p_bUsers->{$player}{battleStatus} && $p_bUsers->{$player}{battleStatus}{mode}) {
-      my $playerId=$p_bUsers->{$player}{battleStatus}{id};
-      if(exists $usedIds{$playerId}) {
-        $playerId=$nextRemappedId++;
-        $p_bUsers->{$player}{battleStatus}{id}=$playerId;
-      }
-      $usedIds{$playerId}=1;
-    }
-  }
-  foreach my $bot (keys %{$p_bBots}) {
-    my $botId=$p_bBots->{$bot}{battleStatus}{id};
-    if(exists $usedIds{$botId}) {
-      $botId=$nextRemappedId++;
-      $p_bBots->{$bot}{battleStatus}{id}=$botId;
-    }
-    $usedIds{$botId}=1;
-  }
-}
-
 sub getSkillValue {
   my $skillString=shift;
   return $1 if($skillString =~ /(\d+(?:\.\d+)?)/);
@@ -467,7 +447,7 @@ sub specSort {
 
 # TODO: refactor this horrible function
 sub generateStartData {
-  my ($self,$p_additionalData,$p_sides,$p_battleData,$autoHostMode,$remapIds)=@_;
+  my ($self,$p_additionalData,$p_sides,$p_battleData,$autoHostMode)=@_;
   $autoHostMode=1 unless(defined $autoHostMode);
   my %conf=%{$self->{conf}};
   my $sl=$conf{simpleLog};
@@ -481,7 +461,6 @@ sub generateStartData {
         return (undef,undef,undef);
       }
     }
-    $self->remapRunningBattleIds() if(defined $remapIds && $remapIds);
     $p_battleData=$self->getRunningBattle();
   }
   my %battleData=%{$p_battleData};
@@ -1552,7 +1531,20 @@ sub clientBattleStatusHandler {
     $sl->log("Ignoring CLIENTBATTLESTATUS command (client \"$user\" out of current battle)",1);
     return 0;
   }
-  $self->{battle}{users}{$user}{battleStatus}=$self->unmarshallBattleStatus($battleStatus);
+  my $r_newClientBattleStatus=$self->unmarshallBattleStatus($battleStatus);
+  if(defined $self->{battle}{users}{$user}{battleStatus}) {
+    if(exists $self->{battle}{users}{$user}{battleStatus}{workaroundTeam}
+       && $r_newClientBattleStatus->{team} % 16 == $self->{battle}{users}{$user}{battleStatus}{workaroundTeam} % 16) {
+      $r_newClientBattleStatus->{workaroundTeam}=$self->{battle}{users}{$user}{battleStatus}{workaroundTeam};
+      $r_newClientBattleStatus->{team}=$r_newClientBattleStatus->{workaroundTeam};
+    }
+    if(exists $self->{battle}{users}{$user}{battleStatus}{workaroundId}
+       && $r_newClientBattleStatus->{id} % 16 == $self->{battle}{users}{$user}{battleStatus}{workaroundId} % 16) {
+      $r_newClientBattleStatus->{workaroundId}=$self->{battle}{users}{$user}{battleStatus}{workaroundId};
+      $r_newClientBattleStatus->{id}=$r_newClientBattleStatus->{workaroundId};
+    }
+  }
+  $self->{battle}{users}{$user}{battleStatus}=$r_newClientBattleStatus;
   $self->{battle}{users}{$user}{color}=$self->unmarshallColor($color);
   return 1;
 }
@@ -1645,6 +1637,72 @@ sub removeBotHandler {
   return 1;
 }
 
+sub updateBotHook {
+  my ($self,$name,$marshalledStatus)=@_[0,2,3];
+
+  my @workaroundStrings;
+  if($marshalledStatus =~ /^(\d+)\((.+)\)$/) {
+    $_[3]=$1;
+    @workaroundStrings=split(/;/,$2);
+  }
+  
+  my $sl=$self->{conf}{simpleLog};
+  if(! exists $self->{battle}{battleId}) {
+    $sl->log('Ignoring UPDATEBOT command sent by client (currently out of any battle)',1);
+    return;
+  }
+  if(! exists $self->{battle}{bots}{$name}) {
+    $sl->log("Ignoring UPDATEBOT command sent by client (unknown bot name \"$name\")",1);
+    return;
+  }
+  
+  delete $self->{battle}{bots}{$name}{battleStatus}{workaroundTeam};
+  delete $self->{battle}{bots}{$name}{battleStatus}{workaroundId};
+  foreach my $workaroundString (@workaroundStrings) {
+    if($workaroundString =~ /^team=(\d+)$/) {
+      $self->{battle}{bots}{$name}{battleStatus}{workaroundTeam}=$1;
+      $self->{battle}{bots}{$name}{battleStatus}{team}=$1 if($1 % 16 == $self->{battle}{bots}{$name}{battleStatus}{team} % 16);
+    }elsif($workaroundString =~ /^id=(\d+)$/) {
+      $self->{battle}{bots}{$name}{battleStatus}{workaroundId}=$1;
+      $self->{battle}{bots}{$name}{battleStatus}{id}=$1 if($1 % 16 == $self->{battle}{bots}{$name}{battleStatus}{id} % 16);
+    }
+  }
+}
+
+sub forceAllyNoHook {
+  my ($self,$name,$teamNb)=@_[0,2,3];
+  $_[3]%=16;
+  my $sl=$self->{conf}{simpleLog};
+  if(! exists $self->{battle}{battleId}) {
+    $sl->log('Ignoring FORCEALLYNO command sent by client (currently out of any battle)',1);
+    return;
+  }
+  if(! exists $self->{battle}{users}{$name}) {
+    $sl->log("Ignoring FORCEALLYNO command sent by client (unknown user name \"$name\")",1);
+    return;
+  }
+  return unless(defined $self->{battle}{users}{$name}{battleStatus});
+  $self->{battle}{users}{$name}{battleStatus}{workaroundTeam}=$teamNb;
+  $self->{battle}{users}{$name}{battleStatus}{team}=$teamNb if($teamNb % 16 == $self->{battle}{users}{$name}{battleStatus}{team} % 16);
+}
+
+sub forceTeamNoHook {
+  my ($self,$name,$idNb)=@_[0,2,3];
+  $_[3]%=16;
+  my $sl=$self->{conf}{simpleLog};
+  if(! exists $self->{battle}{battleId}) {
+    $sl->log('Ignoring FORCETEAMNO command sent by client (currently out of any battle)',1);
+    return;
+  }
+  if(! exists $self->{battle}{users}{$name}) {
+    $sl->log("Ignoring FORCETEAMNO command sent by client (unknown user name \"$name\")",1);
+    return;
+  }
+  return unless(defined $self->{battle}{users}{$name}{battleStatus});
+  $self->{battle}{users}{$name}{battleStatus}{workaroundId}=$idNb;
+  $self->{battle}{users}{$name}{battleStatus}{id}=$idNb if($idNb % 16 == $self->{battle}{users}{$name}{battleStatus}{id} % 16);
+}
+
 sub updateBotHandler {
   my ($self,undef,$battleId,$name,$battleStatus,$color)=@_;
   my $sl=$self->{conf}{simpleLog};
@@ -1656,7 +1714,20 @@ sub updateBotHandler {
     $sl->log("Ignoring UPDATEBOT command (wrong battle ID:\"$battleId\")",1);
     return 0;
   }
-  $self->{battle}{bots}{$name}{battleStatus}=$self->unmarshallBattleStatus($battleStatus);
+  my $r_newBotBattleStatus=$self->unmarshallBattleStatus($battleStatus);
+  if(defined $self->{battle}{bots}{$name}{battleStatus}) {
+    if(exists $self->{battle}{bots}{$name}{battleStatus}{workaroundTeam}
+       && $r_newBotBattleStatus->{team} % 16 == $self->{battle}{bots}{$name}{battleStatus}{workaroundTeam} % 16) {
+      $r_newBotBattleStatus->{workaroundTeam}=$self->{battle}{bots}{$name}{battleStatus}{workaroundTeam};
+      $r_newBotBattleStatus->{team}=$r_newBotBattleStatus->{workaroundTeam};
+    }
+    if(exists $self->{battle}{bots}{$name}{battleStatus}{workaroundId}
+       && $r_newBotBattleStatus->{id} % 16 == $self->{battle}{bots}{$name}{battleStatus}{workaroundId} % 16) {
+      $r_newBotBattleStatus->{workaroundId}=$self->{battle}{bots}{$name}{battleStatus}{workaroundId};
+      $r_newBotBattleStatus->{id}=$r_newBotBattleStatus->{workaroundId};
+    }
+  }
+  $self->{battle}{bots}{$name}{battleStatus}=$r_newBotBattleStatus;
   $self->{battle}{bots}{$name}{color}=$self->unmarshallColor($color);
   return 1;
 }
