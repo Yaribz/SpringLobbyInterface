@@ -36,7 +36,7 @@ sub notall (&@) { my $c = shift; return defined first {! &$c} @_; }
 
 # Internal data ###############################################################
 
-my $moduleVersion='0.31';
+my $moduleVersion='0.32';
 
 my %sentenceStartPosClient = (
   REQUESTUPDATEFILE => 1,
@@ -638,7 +638,16 @@ sub generateStartData {
       push(@startData,"    AccountId=$playerAccountId;");
       if(exists $p_additionalData->{playerData} && exists $p_additionalData->{playerData}{$playerAccountId}) {
         foreach my $tag (keys %{$p_additionalData->{playerData}{$playerAccountId}}) {
-          push(@startData,"    $tag=$p_additionalData->{playerData}{$playerAccountId}{$tag};")
+          if(ref $p_additionalData->{playerData}{$playerAccountId}{$tag} eq 'HASH') {
+            push(@startData,"    [$tag]");
+            push(@startData,"    {");
+            foreach my $subTag (keys %{$p_additionalData->{playerData}{$playerAccountId}{$tag}}) {
+              push(@startData,"      $subTag=$p_additionalData->{playerData}{$playerAccountId}{$tag}{$subTag};")
+            }
+            push(@startData,"    }");
+          }else{
+            push(@startData,"    $tag=$p_additionalData->{playerData}{$playerAccountId}{$tag};")
+          }
         }
       }
     }
@@ -660,6 +669,20 @@ sub generateStartData {
     push(@startData,"    Team=$team;");
     push(@startData,"    Host=".aindex(@{$battleData{userList}},$battleData{bots}{$bot}{owner}).';');
     push(@startData,"    Version=$aiVersion;") if(defined $aiVersion);
+    if(exists $p_additionalData->{aiData} && exists $p_additionalData->{aiData}{$bot}) {
+      foreach my $tag (keys %{$p_additionalData->{aiData}{$bot}}) {
+        if(ref $p_additionalData->{aiData}{$bot}{$tag} eq 'HASH') {
+          push(@startData,"    [$tag]");
+          push(@startData,"    {");
+          foreach my $subTag (keys %{$p_additionalData->{aiData}{$bot}{$tag}}) {
+            push(@startData,"      $subTag=$p_additionalData->{aiData}{$bot}{$tag}{$subTag};")
+          }
+          push(@startData,"    }");
+        }else{
+          push(@startData,"    $tag=$p_additionalData->{aiData}{$bot}{$tag};")
+        }
+      }
+    }
     push(@startData,"  }");
   }
 

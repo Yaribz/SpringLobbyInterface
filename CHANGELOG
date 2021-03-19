@@ -75,3 +75,5 @@ SpringLobbyInterface.pm:
 0.30: use graceful socket shutdown to disconnect from lobby server (fix quit messages sometimes ignored by lobby server)
 0.31: improve workarounds for lobby protocol limitations
       support maximum number of teams and IDs allowed by engine (251)
+0.32: allow additional start script tags to be inserted in AI sections
+      allow additional start script subsections to be inserted in players and AI sections
