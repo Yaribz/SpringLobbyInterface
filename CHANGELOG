@@ -77,3 +77,4 @@ SpringLobbyInterface.pm:
       support maximum number of teams and IDs allowed by engine (251)
 0.32: allow additional start script tags to be inserted in AI sections
       allow additional start script subsections to be inserted in players and AI sections
+0.33: sort AI bots by ID number when adding them to the start script (like players)

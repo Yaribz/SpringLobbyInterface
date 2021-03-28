@@ -36,7 +36,7 @@ sub notall (&@) { my $c = shift; return defined first {! &$c} @_; }
 
 # Internal data ###############################################################
 
-my $moduleVersion='0.32';
+my $moduleVersion='0.33';
 
 my %sentenceStartPosClient = (
   REQUESTUPDATEFILE => 1,
@@ -492,6 +492,9 @@ sub generateStartData {
   my @orderedPlayers = sort { $battleData{users}{$a}{battleStatus}{id} <=> $battleData{users}{$b}{battleStatus}{id} } @playerList;
   my @orderedSpecs = sort { specSort(\%battleData,$a,$b) } @specList;
   $battleData{userList}=[@orderedPlayers,@orderedSpecs];
+
+  my @orderedBots = sort { $battleData{bots}{$a}{battleStatus}{id} <=> $battleData{bots}{$b}{battleStatus}{id} } @{$battleData{botList}};
+  $battleData{botList}=\@orderedBots;
 
   for my $userIndex (0..$#{$battleData{userList}}) {
     my $user=$battleData{userList}->[$userIndex];
