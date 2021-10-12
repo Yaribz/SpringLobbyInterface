@@ -36,7 +36,7 @@ sub notall (&@) { my $c = shift; return defined first {! &$c} @_; }
 
 # Internal data ###############################################################
 
-my $moduleVersion='0.33';
+my $moduleVersion='0.34';
 
 my %sentenceStartPosClient = (
   REQUESTUPDATEFILE => 1,
@@ -768,6 +768,17 @@ sub generateStartData {
   }
   push(@startData,"  }");
 
+  foreach my $tag (sort keys %{$p_additionalData}) {
+    next if(any {$tag eq $_} (qw'playerData aiData'));
+    if(ref $p_additionalData->{$tag} eq 'HASH') {
+      push(@startData,"  [$tag]");
+      push(@startData,"  {");
+      foreach my $subTag (sort keys %{$p_additionalData->{$tag}}) {
+        push(@startData,"    $subTag=$p_additionalData->{$tag}{$subTag};")
+      }
+      push(@startData,"  }");
+    }
+  }
   push(@startData,"}");
 
   return (\@startData,\%teamsMap,\%allyTeamsMap);
