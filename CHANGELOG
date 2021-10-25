@@ -79,3 +79,4 @@ SpringLobbyInterface.pm:
       allow additional start script subsections to be inserted in players and AI sections
 0.33: sort AI bots by ID number when adding them to the start script (like players)
 0.34: allow custom additional start script sections
+0.35: ensure the number type is used for all the unmarshalled status structures fields (fix some type inconsistencies when used with Inline::Python)

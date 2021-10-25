@@ -36,7 +36,7 @@ sub notall (&@) { my $c = shift; return defined first {! &$c} @_; }
 
 # Internal data ###############################################################
 
-my $moduleVersion='0.34';
+my $moduleVersion='0.35';
 
 my %sentenceStartPosClient = (
   REQUESTUPDATEFILE => 1,
@@ -263,11 +263,11 @@ sub unmarshallClientStatus {
   my @cs=split("",$csBin);
   my $offset=0;
   $offset=$#cs-6 if($#cs>6);
-  return { inGame => $cs[$offset+6],
-           away => $cs[$offset+5],
+  return { inGame => $cs[$offset+6]+0,
+           away => $cs[$offset+5]+0,
            rank => oct("0b".$cs[$offset+2].$cs[$offset+3].$cs[$offset+4]),
-           access =>$cs[$offset+1],
-           bot => $cs[$offset] };
+           access =>$cs[$offset+1]+0,
+           bot => $cs[$offset]+0 };
 }
 
 sub marshallBattleStatus {
@@ -295,10 +295,10 @@ sub unmarshallBattleStatus {
   return { side => oct("0b".$bs[4].$bs[5].$bs[6].$bs[7]),
            sync => oct("0b".$bs[8].$bs[9]),
            bonus => oct("0b".$bs[14].$bs[15].$bs[16].$bs[17].$bs[18].$bs[19].$bs[20]),
-           mode => $bs[21],
+           mode => $bs[21]+0,
            team => oct("0b".$bs[22].$bs[23].$bs[24].$bs[25]),
            id => oct("0b".$bs[26].$bs[27].$bs[28].$bs[29]),
-           ready => $bs[30] };
+           ready => $bs[30]+0 };
 }
 
 sub marshallColor {
