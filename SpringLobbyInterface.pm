@@ -36,7 +36,7 @@ sub notall (&@) { my $c = shift; return defined first {! &$c} @_; }
 
 # Internal data ###############################################################
 
-my $moduleVersion='0.35';
+my $moduleVersion='0.36';
 
 my %sentenceStartPosClient = (
   REQUESTUPDATEFILE => 1,
@@ -197,7 +197,8 @@ sub new {
     password => '*',
     lastSndTs => 0,
     lastRcvTs => 0,
-    tlsCertifHash => undef
+    tlsCertifHash => undef,
+    tlsServerIsAuthenticated => undef
   };
 
   bless ($self, $class);
@@ -938,6 +939,7 @@ sub disconnect {
   $self->{lastSndTs}=0;
   $self->{lastRcvTs}=0;
   $self->{tlsCertifHash}=undef;
+  $self->{tlsServerIsAuthenticated}=undef;
 }
 
 sub sendCommand {
@@ -1194,10 +1196,14 @@ sub okHandler {
   }elsif(defined $self->{tlsCertifHash}) {
     $sl->log("Trying to activate TLS but TLS is already activated!",1);
   }else{
-    my $startSslResult=IO::Socket::SSL->start_SSL($self->{lobbySock}, SSL_verify_mode => IO::Socket::SSL::SSL_VERIFY_NONE());
+    my ($startSslResult,$tlsCertifIsInvalid);
+    $startSslResult=IO::Socket::SSL->start_SSL($self->{lobbySock},
+                                               SSL_verify_callback => sub {$tlsCertifIsInvalid=1 unless($_[0]); return 1;},
+                                               SSL_verifycn_scheme => 'none');
     if(! $startSslResult) {
       $sl->log("Error during TLS handshake: $IO::Socket::SSL::SSL_ERROR",1);
     }else{
+      $self->{tlsServerIsAuthenticated}=$tlsCertifIsInvalid?0:$self->{lobbySock}->verify_hostname($self->{conf}{serverHost});
       my $tlsCertifHash=$self->{lobbySock}->get_fingerprint('sha256');
       if($tlsCertifHash =~ /^sha256\$([\da-fA-F]+)$/) {
         $self->{tlsCertifHash}=lc($1);
