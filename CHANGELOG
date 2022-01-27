@@ -81,3 +81,4 @@ SpringLobbyInterface.pm:
 0.34: allow custom additional start script sections
 0.35: ensure the number type is used for all the unmarshalled status structures fields (fix some type inconsistencies when used with Inline::Python)
 0.36: retrieve and store the lobby server TLS authentication state when enabling TLS to let the client decide if connection is trusted
+0.37: ensure the number type is used for id and team numbers even when forced through lobby commands (fix some type inconsistencies when used with Inline::Python)

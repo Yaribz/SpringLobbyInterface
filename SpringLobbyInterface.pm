@@ -1,7 +1,7 @@
 # Object-oriented Perl module implementing a callback-based interface to
 # communicate with SpringRTS lobby server.
 #
-# Copyright (C) 2008-2021  Yann Riou <yaribzh@gmail.com>
+# Copyright (C) 2008-2022  Yann Riou <yaribzh@gmail.com>
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -36,7 +36,7 @@ sub notall (&@) { my $c = shift; return defined first {! &$c} @_; }
 
 # Internal data ###############################################################
 
-my $moduleVersion='0.36';
+my $moduleVersion='0.37';
 
 my %sentenceStartPosClient = (
   REQUESTUPDATEFILE => 1,
@@ -1703,17 +1703,20 @@ sub updateBotHook {
   delete $self->{battle}{bots}{$name}{battleStatus}{workaroundId};
   foreach my $workaroundString (@workaroundStrings) {
     if($workaroundString =~ /^team=(\d+)$/) {
-      $self->{battle}{bots}{$name}{battleStatus}{workaroundTeam}=$1;
-      $self->{battle}{bots}{$name}{battleStatus}{team}=$1 if($1 % 16 == $self->{battle}{bots}{$name}{battleStatus}{team} % 16);
+      my $teamNb=$1+0;
+      $self->{battle}{bots}{$name}{battleStatus}{workaroundTeam}=$teamNb;
+      $self->{battle}{bots}{$name}{battleStatus}{team}=$teamNb if($teamNb % 16 == $self->{battle}{bots}{$name}{battleStatus}{team} % 16);
     }elsif($workaroundString =~ /^id=(\d+)$/) {
-      $self->{battle}{bots}{$name}{battleStatus}{workaroundId}=$1;
-      $self->{battle}{bots}{$name}{battleStatus}{id}=$1 if($1 % 16 == $self->{battle}{bots}{$name}{battleStatus}{id} % 16);
+      my $idNb=$1+0;
+      $self->{battle}{bots}{$name}{battleStatus}{workaroundId}=$idNb;
+      $self->{battle}{bots}{$name}{battleStatus}{id}=$idNb if($idNb % 16 == $self->{battle}{bots}{$name}{battleStatus}{id} % 16);
     }
   }
 }
 
 sub forceAllyNoHook {
   my ($self,$name,$teamNb)=@_[0,2,3];
+  $teamNb+=0;
   $_[3]%=16;
   my $sl=$self->{conf}{simpleLog};
   if(! exists $self->{battle}{battleId}) {
@@ -1731,6 +1734,7 @@ sub forceAllyNoHook {
 
 sub forceTeamNoHook {
   my ($self,$name,$idNb)=@_[0,2,3];
+  $idNb+=0;
   $_[3]%=16;
   my $sl=$self->{conf}{simpleLog};
   if(! exists $self->{battle}{battleId}) {
