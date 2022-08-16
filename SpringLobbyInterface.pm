@@ -36,7 +36,7 @@ sub notall (&@) { my $c = shift; return defined first {! &$c} @_; }
 
 # Internal data ###############################################################
 
-my $moduleVersion='0.37';
+my $moduleVersion='0.38';
 
 my %sentenceStartPosClient = (
   REQUESTUPDATEFILE => 1,
@@ -1805,7 +1805,7 @@ sub setScriptTagsHandler {
     return 0;
   }
   foreach my $tagValue (@scriptTags) {
-    if($tagValue =~ /^\s*([^=]*[^=\s])\s*=\s*(.*[^\s])\s*$/) {
+    if($tagValue =~ /^\s*([^=]*[^=\s])\s*=\s*((?:.*[^\s])?)\s*$/) {
       $self->{battle}{scriptTags}{$1}=$2;
     }else{
       $sl->log("Ignoring invalid script tag in SETSCRIPTTAGS \"$tagValue\"",2);
