@@ -36,9 +36,9 @@ sub notall (&@) { my $c = shift; return defined first {! &$c} @_; }
 
 # Internal data ###############################################################
 
-my $moduleVersion='0.38';
+my $moduleVersion='0.39';
 
-my %sentenceStartPosClient = (
+our %sentenceStartPosClient = (
   REQUESTUPDATEFILE => 1,
   LOGIN => 5,
   CHANNELTOPIC => 2,
@@ -59,7 +59,7 @@ my %sentenceStartPosClient = (
   JOINBATTLEDENY => 2
 );
 
-my %sentenceStartPosServer = (
+our %sentenceStartPosServer = (
   REGISTRATIONDENIED => 1,
   DENIED => 1,
   AGREEMENT => 1,
@@ -95,9 +95,9 @@ my %sentenceStartPosServer = (
   CHANNEL => 3
 );
 
-my @tabWorkaroundCommands = qw/CHANNELTOPIC SAID SAIDEX SAIDPRIVATE SAIDPRIVATEEX SAIDBATTLE SAIDBATTLEEX SAYPRIVATE SAYPRIVATEEX/;
+our @tabWorkaroundCommands = qw/CHANNELTOPIC SAID SAIDEX SAIDPRIVATE SAIDPRIVATEEX SAIDBATTLE SAIDBATTLEEX SAYPRIVATE SAYPRIVATEEX/;
 
-my %commandHooks = (
+our %commandHooks = (
   LOGIN => \&loginHook,
   LEAVE => \&leaveChannelHandler,
   OPENBATTLE => \&openBattleHook,
@@ -112,7 +112,7 @@ my %commandHooks = (
   FORCETEAMNO => \&forceTeamNoHook
 );
 
-my %commandHandlers = (
+our %commandHandlers = (
   TASSERVER => \&tasserverHandler,
   ACCEPTED => \&acceptedHandler,
   OK => \&okHandler,
