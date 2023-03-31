@@ -84,3 +84,4 @@ SpringLobbyInterface.pm:
 0.37: ensure the number type is used for id and team numbers even when forced through lobby commands (fix some type inconsistencies when used with Inline::Python)
 0.38: add support for empty script tags
 0.39: make lobby protocol definition structures shared to ease protocol extensions from external modules
+0.40: try to load TLS module (IO::Socket::SSL) only when required (i.e. when receiving OK response from lobby server)

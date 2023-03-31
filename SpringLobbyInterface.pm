@@ -1,7 +1,7 @@
 # Object-oriented Perl module implementing a callback-based interface to
 # communicate with SpringRTS lobby server.
 #
-# Copyright (C) 2008-2022  Yann Riou <yaribzh@gmail.com>
+# Copyright (C) 2008-2023  Yann Riou <yaribzh@gmail.com>
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -36,7 +36,7 @@ sub notall (&@) { my $c = shift; return defined first {! &$c} @_; }
 
 # Internal data ###############################################################
 
-my $moduleVersion='0.39';
+my $moduleVersion='0.40';
 
 our %sentenceStartPosClient = (
   REQUESTUPDATEFILE => 1,
@@ -147,7 +147,7 @@ our %commandHandlers = (
   REMOVESCRIPTTAGS => \&removeScriptTagsHandler
 );
 
-my $tlsAvailable=eval { require IO::Socket::SSL; 1; };
+my $tlsAvailable; # checked only when needed to avoid loading IO::Socket::SSL if not required
 
 # Constructor #################################################################
 
@@ -239,10 +239,6 @@ sub getBattle {
 sub getRunningBattle {
   my $self = shift;
   return dclone($self->{runningBattle});
-}
-
-sub isTlsAvailable {
-  return $tlsAvailable;
 }
 
 # Marshallers/unmarshallers ###################################################
@@ -1191,6 +1187,7 @@ sub tasserverHandler {
 sub okHandler {
   my $self=shift;
   my $sl=$self->{conf}{simpleLog};
+  $tlsAvailable //= eval {require IO::Socket::SSL; 1} ? 1 : 0;
   if(! $tlsAvailable) {
     $sl->log("Trying to activate TLS but no TLS module is available!",1);
   }elsif(defined $self->{tlsCertifHash}) {
