@@ -36,7 +36,7 @@ sub notall (&@) { my $c = shift; return defined first {! &$c} @_; }
 
 # Internal data ###############################################################
 
-my $moduleVersion='0.40';
+my $moduleVersion='0.41';
 
 our %sentenceStartPosClient = (
   REQUESTUPDATEFILE => 1,
@@ -198,7 +198,8 @@ sub new {
     lastSndTs => 0,
     lastRcvTs => 0,
     tlsCertifHash => undef,
-    tlsServerIsAuthenticated => undef
+    tlsServerIsAuthenticated => undef,
+    performingTlsHandshake => undef,
   };
 
   bless ($self, $class);
@@ -336,8 +337,7 @@ sub marshallCommand {
 
 sub unmarshallCommand {
   my ($self,$marshalled)=@_;
-  my %conf=%{$self->{conf}};
-  my $sl=$conf{simpleLog};
+  my $sl=$self->{conf}{simpleLog};
   my $command="";
   my $marshalledParams="";
   if($marshalled =~ /^((?:\#\d+ +)?[^ ]+)((?: .*)?)$/) {
@@ -362,8 +362,7 @@ sub unmarshallCommand {
 
 sub unmarshallParams {
   my ($self,$marshalledParams,$sentencePos,$command)=@_;
-  my %conf=%{$self->{conf}};
-  my $sl=$conf{simpleLog};
+  my $sl=$self->{conf}{simpleLog};
   if($sentencePos != 1) {
     return ($marshalledParams) unless($marshalledParams =~ / /);
     if($marshalledParams =~ /^([^ ]*) (.*)$/) {
@@ -446,8 +445,7 @@ sub specSort {
 sub generateStartData {
   my ($self,$p_additionalData,$p_sides,$p_battleData,$autoHostMode)=@_;
   $autoHostMode=1 unless(defined $autoHostMode);
-  my %conf=%{$self->{conf}};
-  my $sl=$conf{simpleLog};
+  my $sl=$self->{conf}{simpleLog};
   $p_additionalData={} unless(defined $p_additionalData);
   if(! (defined $p_battleData)) {
     if(! %{$self->{runningBattle}}) {
@@ -832,8 +830,7 @@ sub removePreCallbacks {
 
 sub checkTimeouts {
   my $self = shift;
-  my %conf=%{$self->{conf}};
-  my $sl=$conf{simpleLog};
+  my $sl=$self->{conf}{simpleLog};
   foreach my $pr (keys %{$self->{pendingRequests}}) {
     my ($p_callbacks,$timeout,$p_timeoutCallback)=@{$self->{pendingRequests}{$pr}};
     if(time > $timeout) {
@@ -936,12 +933,14 @@ sub disconnect {
   $self->{lastRcvTs}=0;
   $self->{tlsCertifHash}=undef;
   $self->{tlsServerIsAuthenticated}=undef;
+  $self->{performingTlsHandshake}=undef;
+  delete $self->{startTlsCallback};
 }
 
 sub sendCommand {
   my ($self,$p_command,$p_callbacks,$p_timeoutCallback) = @_;
-  my %conf=%{$self->{conf}};
-  my $sl=$conf{simpleLog};
+  my $r_conf=$self->{conf};
+  my $sl=$r_conf->{simpleLog};
   if(! ((defined $self->{lobbySock}) && $self->{lobbySock})) {
     $sl->log("Unable to send command, not connected to lobby server",1);
     return 0;
@@ -972,7 +971,7 @@ sub sendCommand {
       foreach my $response (keys %callbacks) {
         $self->{pendingResponses}{$response}=$p_command->[0];
       }
-      $self->{pendingRequests}{$p_command->[0]}=[$p_callbacks,time+$conf{timeout},$p_timeoutCallback];
+      $self->{pendingRequests}{$p_command->[0]}=[$p_callbacks,time+$r_conf->{timeout},$p_timeoutCallback];
     }
   }
   return 1;
@@ -993,12 +992,13 @@ sub prioSort {
 
 sub receiveCommand {
   my $self=shift;
-  my %conf=%{$self->{conf}};
-  my $sl=$conf{simpleLog};
+  my $r_conf=$self->{conf};
+  my $sl=$r_conf->{simpleLog};
   if(! ((defined $self->{lobbySock}) && $self->{lobbySock})) {
     $sl->log("Unable to receive command from lobby server, not connected!",1);
     return 0;
   }
+  return $self->doTlsHandshake() if($self->{performingTlsHandshake});
   my $lobbySock=$self->{lobbySock};
   my $data;
   my $readLength=$lobbySock->sysread($data,4096);
@@ -1068,7 +1068,7 @@ sub receiveCommand {
       if($commandHandlers{$realCommandName}) {
         my $handlerRc=&{$commandHandlers{$realCommandName}}($self,@{$p_command});
         $rc = $handlerRc && $rc;
-        &{$conf{inconsistencyHandler}}($realCommandName,$marshalledCommand) if(! $handlerRc && $conf{inconsistencyHandler});
+        &{$r_conf->{inconsistencyHandler}}($realCommandName,$marshalledCommand) if(! $handlerRc && $r_conf->{inconsistencyHandler});
       }
       $handlerTime=time-$handlerTime;
     }
@@ -1129,7 +1129,7 @@ sub receiveCommand {
       $processed=1;
       $rc = &{$callback}(@{$p_command}) && $rc if($callback);
     }
-    if(! $processed && $conf{warnForUnhandledMessages}) {
+    if(! $processed && $r_conf->{warnForUnhandledMessages}) {
       $sl->log("Unexpected/unhandled command received: \"$marshalledCommand\"",2);
       $rc=0;
     }
@@ -1184,34 +1184,89 @@ sub tasserverHandler {
   return %{$r_checkParamsRes} ? 0 : 1;
 }
 
-sub okHandler {
-  my $self=shift;
+sub startTls {
+  my ($self,$r_callback)=@_;
   my $sl=$self->{conf}{simpleLog};
   $tlsAvailable //= eval {require IO::Socket::SSL; 1} ? 1 : 0;
   if(! $tlsAvailable) {
-    $sl->log("Trying to activate TLS but no TLS module is available!",1);
-  }elsif(defined $self->{tlsCertifHash}) {
-    $sl->log("Trying to activate TLS but TLS is already activated!",1);
-  }else{
-    my ($startSslResult,$tlsCertifIsInvalid);
-    $startSslResult=IO::Socket::SSL->start_SSL($self->{lobbySock},
-                                               SSL_verify_callback => sub {$tlsCertifIsInvalid=1 unless($_[0]); return 1;},
-                                               SSL_verifycn_scheme => 'none');
-    if(! $startSslResult) {
-      $sl->log("Error during TLS handshake: $IO::Socket::SSL::SSL_ERROR",1);
-    }else{
-      $self->{tlsServerIsAuthenticated}=$tlsCertifIsInvalid?0:$self->{lobbySock}->verify_hostname($self->{conf}{serverHost});
-      my $tlsCertifHash=$self->{lobbySock}->get_fingerprint('sha256');
-      if($tlsCertifHash =~ /^sha256\$([\da-fA-F]+)$/) {
-        $self->{tlsCertifHash}=lc($1);
-        $sl->log('TLS enabled ('.($self->{lobbySock}->get_sslversion()).','.($self->{lobbySock}->get_cipher()).')',3);
-        $sl->log("TLS server certificate fingerpint (SHA-256): $self->{tlsCertifHash}",5);
-      }else{
-        $sl->log("Invalid TLS server certificate fingerprint: \"$tlsCertifHash\"",1);
-      }
-    }
+    $sl->log('Unable to start TLS: no TLS module available!',1);
+    return 0;
   }
+  if(exists $self->{startTlsCallback}) {
+    $sl->log('Unable to start TLS: a TLS handshake is already in progress!',1);
+    return 0;
+  }
+  if(defined $self->{tlsCertifHash}) {
+    $sl->log('Unable to start TLS: TLS is already enabled!',1);
+    return 0;
+  }
+  $self->sendCommand(['STLS'])
+      or return 0;
+  $self->{startTlsCallback}=$r_callback;
   return 1;
+}
+
+sub okHandler {
+  my ($self,undef,$cmdParam)=@_;
+  return 1 if(defined $cmdParam && $cmdParam ne '' && lc($cmdParam) ne 'cmd=stls');
+  my $sl=$self->{conf}{simpleLog};
+  $tlsAvailable //= eval {require IO::Socket::SSL; 1} ? 1 : 0;
+  if(! $tlsAvailable) {
+    $sl->log('Trying to activate TLS but no TLS module is available!',1);
+    return 0;
+  }
+  if(defined $self->{tlsCertifHash}) {
+    $sl->log('Duplicate OK command received from server, TLS is already enabled!',1);
+    return 0;
+  }
+  $sl->log('Upgrading socket to IO::Socket::SSL...',5);
+  if(IO::Socket::SSL->start_SSL($self->{lobbySock},
+                                SSL_verify_callback => sub {$self->{tlsCertifIsInvalid}=1 unless($_[0]); return 1;},
+                                SSL_verifycn_scheme => 'none',
+                                SSL_startHandshake => 0)) {
+      $sl->log('Starting TLS handshake...',5);
+      $self->{performingTlsHandshake}=1;
+      $self->{lobbySock}->blocking(0);
+      return $self->doTlsHandshake();
+  }else{
+    $sl->log("Failed to upgrade socket: $IO::Socket::SSL::SSL_ERROR",1);
+    my $r_callback = delete $self->{startTlsCallback};
+    $r_callback->(0) if(defined $r_callback);
+    return 0;
+  }
+}
+
+sub doTlsHandshake {
+  my $self=shift;
+  my $r_conf=$self->{conf};
+  my $sl=$r_conf->{simpleLog};
+  if($self->{lobbySock}->connect_SSL()) {
+    undef $self->{performingTlsHandshake};
+    my $lobbySock=$self->{lobbySock};
+    $lobbySock->blocking(1);
+    $self->{tlsServerIsAuthenticated} = delete $self->{tlsCertifIsInvalid} ? 0 : $lobbySock->verify_hostname($r_conf->{serverHost});
+    my $tlsCertifHash=$lobbySock->get_fingerprint('sha256');
+    if($tlsCertifHash =~ /^sha256\$([\da-fA-F]+)$/) {
+      $self->{tlsCertifHash}=lc($1);
+      $sl->log('TLS enabled ('.($lobbySock->get_sslversion()).','.($lobbySock->get_cipher()).')',3);
+      $sl->log("TLS server certificate fingerpint (SHA-256): $self->{tlsCertifHash}",5);
+    }else{
+      $sl->log("Invalid TLS server certificate fingerprint: \"$tlsCertifHash\"",1);
+    }
+    my $r_callback = delete $self->{startTlsCallback};
+    $r_callback->(1) if(defined $r_callback);
+    return 1;
+  }elsif($! == Errno::EWOULDBLOCK) {
+    $sl->log('TLS handshake in progress...',5);
+    return 1;
+  }else{
+    $sl->log("Error during TLS handshake: $IO::Socket::SSL::SSL_ERROR",1);
+    undef $self->{performingTlsHandshake};
+    $self->{lobbySock}->blocking(1);
+    my $r_callback = delete $self->{startTlsCallback};
+    $r_callback->(0) if(defined $r_callback);
+    return 0;
+  }
 }
 
 sub loginHook {

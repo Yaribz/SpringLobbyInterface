@@ -85,3 +85,5 @@ SpringLobbyInterface.pm:
 0.38: add support for empty script tags
 0.39: make lobby protocol definition structures shared to ease protocol extensions from external modules
 0.40: try to load TLS module (IO::Socket::SSL) only when required (i.e. when receiving OK response from lobby server)
+0.41: make TLS handshake non-blocking
+      minor optimizations in some heavily used functions (avoid unnecessary data copy)
