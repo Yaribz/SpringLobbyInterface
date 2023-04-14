@@ -36,7 +36,7 @@ sub notall (&@) { my $c = shift; return defined first {! &$c} @_; }
 
 # Internal data ###############################################################
 
-my $moduleVersion='0.41';
+my $moduleVersion='0.42';
 
 our %sentenceStartPosClient = (
   REQUESTUPDATEFILE => 1,
@@ -889,11 +889,11 @@ sub connect {
 sub gracefulSocketShutdown {
   my $socket=shift;
   shutdown($socket,1);
-  my $timeoutTime=Time::HiRes::time+5;
+  my $timeoutTime=time+5;
   my $nbLingerPackets=0;
   my $shutdownSel=IO::Select->new($socket);
   while($nbLingerPackets<10) {
-    my $maxWait=$timeoutTime-Time::HiRes::time;
+    my $maxWait=$timeoutTime-time;
     $maxWait=0 if($maxWait < 0);
     last unless($shutdownSel->can_read($maxWait));
     my $readLength=$socket->sysread(my $ignored,4096);
