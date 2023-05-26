@@ -36,7 +36,7 @@ sub notall (&@) { my $c = shift; return defined first {! &$c} @_; }
 
 # Internal data ###############################################################
 
-my $moduleVersion='0.43';
+my $moduleVersion='0.44';
 
 our %sentenceStartPosClient = (
   REQUESTUPDATEFILE => 1,
@@ -99,14 +99,13 @@ our @tabWorkaroundCommands = qw/CHANNELTOPIC SAID SAIDEX SAIDPRIVATE SAIDPRIVATE
 
 our %commandHooks = (
   LOGIN => \&loginHook,
-  LEAVE => \&leaveChannelHandler,
   OPENBATTLE => \&openBattleHook,
   JOINBATTLE => \&joinBattleHook,
-  DISABLEUNITS => \&disableUnitsHandler,
-  ENABLEUNITS => \&enableUnitsHandler,
-  ENABLEALLUNITS => \&enableAllUnitsHandler,
-  ADDSTARTRECT => \&addStartRectHandler,
-  REMOVESTARTRECT => \&removeStartRectHandler,
+  DISABLEUNITS => \&disableUnitsHandler,       #
+  ENABLEUNITS => \&enableUnitsHandler,         #
+  ENABLEALLUNITS => \&enableAllUnitsHandler,   # These commands aren't sent back to battle founder by legacy lobby server (TASServer)
+  ADDSTARTRECT => \&addStartRectHandler,       #
+  REMOVESTARTRECT => \&removeStartRectHandler, #
   UPDATEBOT => \&updateBotHook,
   FORCEALLYNO => \&forceAllyNoHook,
   FORCETEAMNO => \&forceTeamNoHook
@@ -125,7 +124,7 @@ our %commandHandlers = (
   CLIENTS => \&clientsHandler,
   JOINED => \&joinedHandler,
   LEFT => \&leftHandler,
-  FORCELEAVECHANNEL => \&leaveChannelHandler,
+  FORCELEAVECHANNEL => \&forceLeaveChannelHandler,
   OPENBATTLE => \&openBattleHandler,
   BATTLEOPENED => \&battleOpenedHandler,
   BATTLECLOSED => \&battleClosedHandler,
@@ -1363,7 +1362,12 @@ sub channelTopicHandler {
 
 sub joinHandler {
   my ($self,undef,$channel)=@_;
-  $self->{channels}{$channel}={topic => {}, users => {}};
+  my $sl=$self->{conf}{simpleLog};
+  if(exists $self->{channels}{$channel}) {
+    $sl->log("Ignoring JOIN command (already joined channel:\"$channel\")",1);
+    return 0;
+  }
+  $self->{channels}{$channel}={topic => {}, users => {$self->{login} => 1}};
   return 1;
 }
 
@@ -1401,6 +1405,13 @@ sub joinedHandler {
     $sl->log("Ignoring JOINED command (unknown user:\"$user\")",1);
     return 0;
   }
+  if(exists $self->{channels}{$channel}{users}{$user}) {
+    # The JOINED command shouldn't be sent to the joining user according to specs but most lobby servers do it anyway...
+    if($user ne $self->{login}) {
+      $sl->log("Ignoring JOINED command (user \"$user\" already in channel \"$channel\")",1);
+      return 0;
+    }
+  }
   $self->{channels}{$channel}{users}{$user}=1;
   return 1;
 }
@@ -1416,12 +1427,25 @@ sub leftHandler {
     $sl->log("Ignoring LEFT command (unknown user:\"$user\")",1);
     return 0;
   }
-  delete $self->{channels}{$channel}{users}{$user};
+  if(! exists $self->{channels}{$channel}{users}{$user}) {
+    $sl->log("Ignoring LEFT command (user \"$user\" not in channel \"$channel\")",1);
+    return 0;
+  }
+  if($user eq $self->{login}) {
+    delete $self->{channels}{$channel};
+  }else{
+    delete $self->{channels}{$channel}{users}{$user};
+  }
   return 1;
 }
 
-sub leaveChannelHandler {
+sub forceLeaveChannelHandler {
   my ($self,undef,$channel)=@_;
+  my $sl=$self->{conf}{simpleLog};
+  if(! exists $self->{channels}{$channel}) {
+    $sl->log("Ignoring FORCELEAVECHANNEL command (non joined channel:\"$channel\")",1);
+    return 0;
+  }
   delete $self->{channels}{$channel};
   return 1;
 }
