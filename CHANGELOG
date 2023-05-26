@@ -91,3 +91,4 @@ SpringLobbyInterface.pm:
 0.43: refactor disabled units management ("disabledUnits" array --> "restrictedUnits" hash)
 0.44: replace obsolete channel leaving management (hook on LEAVE command is no longer needed, current lobby servers behavior is to send the LEFT command to the leaving user)
       minor improvements in channel joining management
+0.45: detect LEFT commands missing before REMOVEUSER (improve resiliency when lobby server doesn't respect lobby protocol)

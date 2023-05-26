@@ -36,7 +36,7 @@ sub notall (&@) { my $c = shift; return defined first {! &$c} @_; }
 
 # Internal data ###############################################################
 
-my $moduleVersion='0.44';
+my $moduleVersion='0.45';
 
 our %sentenceStartPosClient = (
   REQUESTUPDATEFILE => 1,
@@ -1308,7 +1308,8 @@ sub addUserHandler {
                                         rank => 0,
                                         away => 0,
                                         access => 0,
-                                        bot => 0 } };
+                                        bot => 0 },
+                            channels => {} };
   $self->{accounts}{$accountId}=$user if($accountId);
   return %{$r_checkParamsRes} ? 0 : 1;
 }
@@ -1319,6 +1320,11 @@ sub removeUserHandler {
   if(! exists $self->{users}{$user}) {
     $sl->log("Ignoring REMOVEUSER command (unknown user:\"$user\")",1);
     return 0;
+  }
+  my @userChannels = keys %{$self->{users}{$user}{channels}};
+  if(@userChannels) {
+    $sl->log("Missing LEFT command before REMOVEUSER (user \"$user\", channel".(@userChannels>1?'s':'').': '.join(', ',@userChannels).')',2);
+    map {delete $self->{channels}{$_}{users}{$user}} @userChannels;
   }
   delete $self->{accounts}{$self->{users}{$user}{accountId}} if($self->{users}{$user}{accountId});
   delete $self->{users}{$user};
@@ -1367,7 +1373,9 @@ sub joinHandler {
     $sl->log("Ignoring JOIN command (already joined channel:\"$channel\")",1);
     return 0;
   }
-  $self->{channels}{$channel}={topic => {}, users => {$self->{login} => 1}};
+  my $login=$self->{login};
+  $self->{channels}{$channel}={topic => {}, users => {$login => 1}};
+  $self->{users}{$login}{channels}{$channel}=1;
   return 1;
 }
 
@@ -1383,6 +1391,7 @@ sub clientsHandler {
   foreach my $user (@users) {
     if(exists $self->{users}{$user}) {
       $self->{channels}{$channel}{users}{$user}=1;
+      $self->{users}{$user}{channels}{$channel}=1;
     }else{
       push(@unknownUsers,$user);
     }
@@ -1413,6 +1422,7 @@ sub joinedHandler {
     }
   }
   $self->{channels}{$channel}{users}{$user}=1;
+  $self->{users}{$user}{channels}{$channel}=1;
   return 1;
 }
 
@@ -1436,6 +1446,7 @@ sub leftHandler {
   }else{
     delete $self->{channels}{$channel}{users}{$user};
   }
+  delete $self->{users}{$user}{channels}{$channel};
   return 1;
 }
 
@@ -1447,6 +1458,7 @@ sub forceLeaveChannelHandler {
     return 0;
   }
   delete $self->{channels}{$channel};
+  delete $self->{users}{$self->{login}}{channels}{$channel};
   return 1;
 }
 
