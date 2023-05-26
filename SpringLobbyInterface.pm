@@ -36,7 +36,7 @@ sub notall (&@) { my $c = shift; return defined first {! &$c} @_; }
 
 # Internal data ###############################################################
 
-my $moduleVersion='0.42';
+my $moduleVersion='0.43';
 
 our %sentenceStartPosClient = (
   REQUESTUPDATEFILE => 1,
@@ -709,13 +709,14 @@ sub generateStartData {
 
   push(@startData,"");
 
-  push(@startData,"  NumRestrictions=".($#{$battleData{disabledUnits}}+1).";");
+  push(@startData,"  NumRestrictions=".(scalar keys %{$battleData{restrictedUnits}}).";");
   push(@startData,"  [RESTRICT]");
   push(@startData,"  {");
-  for my $uIndex (0..$#{$battleData{disabledUnits}}) {
-    push(@startData,"    Unit$uIndex=$battleData{disabledUnits}->[$uIndex];");
-    push(@startData,"    Limit$uIndex=0;");
-    
+  my $uIndex=0;
+  foreach my $restrictedUnit (keys %{$battleData{restrictedUnits}}) {
+    push(@startData,"    Unit$uIndex=$restrictedUnit;");
+    push(@startData,"    Limit$uIndex=$battleData{restrictedUnits}{$restrictedUnit};");
+    $uIndex++;
   }
   push(@startData,"  }");
 
@@ -1547,7 +1548,7 @@ sub openBattleHandler {
                       bots => {},
                       botList => [],
                       founder => $self->{battles}{$battleId}{founder},
-                      disabledUnits => [],
+                      restrictedUnits => {},
                       startRects => {},
                       scriptTags => {},
                       modHash => $self->{openBattleModHash},
@@ -1576,7 +1577,7 @@ sub joinBattleHandler {
                       bots => {},
                       botList => [],
                       founder => $self->{battles}{$battleId}{founder},
-                      disabledUnits => [],
+                      restrictedUnits => {},
                       startRects => {},
                       scriptTags => {},
                       modHash => $modHash,
@@ -1647,42 +1648,33 @@ sub clientBattleStatusHandler {
 sub disableUnitsHandler {
   my ($self,undef,@units)=@_;
   my $sl=$self->{conf}{simpleLog};
-  if(! exists $self->{battle}{disabledUnits}) {
+  if(! exists $self->{battle}{restrictedUnits}) {
     $sl->log("Ignoring DISABLEUNITS command (currently out of any battle)",1);
     return 0;
   }
-  push(@{$self->{battle}{disabledUnits}},@units);
+  @{$self->{battle}{restrictedUnits}}{@units} = (0) x @units;
   return 1;
 }
 
 sub enableUnitsHandler {
   my ($self,undef,@units)=@_;
   my $sl=$self->{conf}{simpleLog};
-  if(! exists $self->{battle}{disabledUnits}) {
+  if(! exists $self->{battle}{restrictedUnits}) {
     $sl->log("Ignoring ENABLEUNITS command (currently out of any battle)",1);
     return 0;
   }
-  my @disabledUnits=@{$self->{battle}{disabledUnits}};
-  foreach my $u (@units) {
-    my $unitIndex = aindex(@disabledUnits,$u);
-    if($unitIndex != -1) {
-      splice(@disabledUnits,$unitIndex,1);
-    }else{
-      $sl->log("Ignoring ENABLEUNITS for unit $u (already unabled)",1);
-    }
-  }
-  $self->{battle}{disabledUnits}=\@disabledUnits;
+  delete @{$self->{battle}{restrictedUnits}}{@units};
   return 1;
 }
 
 sub enableAllUnitsHandler  {
   my ($self,undef)=@_;
   my $sl=$self->{conf}{simpleLog};
-  if(! exists $self->{battle}{disabledUnits}) {
+  if(! exists $self->{battle}{restrictedUnits}) {
     $sl->log("Ignoring ENABLEALLUNITS command (currently out of any battle)",1);
     return 0;
   }
-  $self->{battle}{disabledUnits}=[];
+  $self->{battle}{restrictedUnits}={};
   return 1;
 }
 

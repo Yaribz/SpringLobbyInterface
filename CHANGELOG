@@ -88,3 +88,4 @@ SpringLobbyInterface.pm:
 0.41: make TLS handshake non-blocking
       minor optimizations in some heavily used functions (avoid unnecessary data copy)
 0.42: do not use unnecessary high resolution timer for graceful socket shutdown timeout (fix error "Bareword Time::HiRes::time not allowed")
+0.43: refactor disabled units management ("disabledUnits" array --> "restrictedUnits" hash)
