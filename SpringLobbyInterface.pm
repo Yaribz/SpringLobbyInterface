@@ -36,7 +36,7 @@ sub notall (&@) { my $c = shift; return defined first {! &$c} @_; }
 
 # Internal data ###############################################################
 
-my $moduleVersion='0.45';
+my $moduleVersion='0.46';
 
 our %sentenceStartPosClient = (
   REQUESTUPDATEFILE => 1,
@@ -1002,10 +1002,18 @@ sub receiveCommand {
   my $lobbySock=$self->{lobbySock};
   my $data;
   my $readLength=$lobbySock->sysread($data,4096);
-  $sl->log("Error while reading data from socket: $!",2) unless(defined $readLength);
-  $data='' unless(defined $data);
-  if($data eq '') {
-    $sl->log("Connection reset by peer or library used with unready socket",2);
+  my $readError;
+  if(defined $readLength) {
+    if($readLength) {
+      $readError='Unknown error while reading data from socket' unless(defined $data && $data ne '');
+    }else{
+      $readError='Connection closed by peer';
+    }
+  }else{
+    $readError='Error while reading data from socket: '.$!;
+  }
+  if(defined $readError) {
+    $sl->log($readError,2);
     if(exists($self->{preCallbacks}{'_DISCONNECT_'})) {
       foreach my $prio (sort prioSort (keys %{$self->{preCallbacks}{'_DISCONNECT_'}})) {
         my $p_preCallback=$self->{preCallbacks}{'_DISCONNECT_'}{$prio};
