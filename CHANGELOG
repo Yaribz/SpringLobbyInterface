@@ -93,3 +93,5 @@ SpringLobbyInterface.pm:
       minor improvements in channel joining management
 0.45: detect LEFT commands missing before REMOVEUSER (improve resiliency when lobby server doesn't respect lobby protocol)
 0.46: improve logging of socket read errors
+0.47: avoid useless try of graceful socket shutdown when connection is already closed by peer
+      improve log message when read errors occur on a TLS connection

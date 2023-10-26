@@ -36,7 +36,7 @@ sub notall (&@) { my $c = shift; return defined first {! &$c} @_; }
 
 # Internal data ###############################################################
 
-my $moduleVersion='0.46';
+my $moduleVersion='0.47';
 
 our %sentenceStartPosClient = (
   REQUESTUPDATEFILE => 1,
@@ -911,7 +911,7 @@ sub disconnect {
   if(! ((defined $self->{lobbySock}) && $self->{lobbySock})) {
     $sl->log("Unable to disconnect from lobby server, already disconnected!",2);
   }else{
-    gracefulSocketShutdown($self->{lobbySock});
+    gracefulSocketShutdown($self->{lobbySock}) if($self->{lobbySock}->connected());
     undef $self->{lobbySock};
   }
   $self->{login}=undef;
@@ -1010,7 +1010,9 @@ sub receiveCommand {
       $readError='Connection closed by peer';
     }
   }else{
-    $readError='Error while reading data from socket: '.$!;
+    $readError=$lobbySock->errstr() if($lobbySock->can('errstr'));
+    $readError=$! unless(defined $readError && $readError ne '');
+    $readError='Error while reading data from socket: '.$readError;
   }
   if(defined $readError) {
     $sl->log($readError,2);
