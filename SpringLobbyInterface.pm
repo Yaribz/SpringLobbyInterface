@@ -36,7 +36,7 @@ sub notall (&@) { my $c = shift; return defined first {! &$c} @_; }
 
 # Internal data ###############################################################
 
-my $moduleVersion='0.47';
+my $moduleVersion='0.48';
 
 our %sentenceStartPosClient = (
   REQUESTUPDATEFILE => 1,
@@ -1737,6 +1737,14 @@ sub addBotHandler {
   }
   if(! exists $self->{users}{$owner}) {
     $sl->log("Ignoring ADDBOT command (unknown owner:\"$owner\")",1);
+    return 0;
+  }
+  if(! exists $self->{battle}{users}{$owner}) {
+    $sl->log("Ignoring ADDBOT command (owner \"$owner\" out of current battle)",1);
+    return 0;
+  }
+  if(exists $self->{battle}{bots}{$name}) {
+    $sl->log("Ignoring ADDBOT command (duplicate bot \"$name\")",1);
     return 0;
   }
   push(@{$self->{battle}{botList}},$name);

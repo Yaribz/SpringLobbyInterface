@@ -95,3 +95,4 @@ SpringLobbyInterface.pm:
 0.46: improve logging of socket read errors
 0.47: avoid useless try of graceful socket shutdown when connection is already closed by peer
       improve log message when read errors occur on a TLS connection
+0.48: detect more cases of invalid ADDBOT command from lobby server
