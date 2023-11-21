@@ -96,3 +96,6 @@ SpringLobbyInterface.pm:
 0.47: avoid useless try of graceful socket shutdown when connection is already closed by peer
       improve log message when read errors occur on a TLS connection
 0.48: detect more cases of invalid ADDBOT command from lobby server
+0.49: detect commands BATTLECLOSED/LEFTBATTLE missing before REMOVEUSER
+      detect commands REMOVEBOT missing before LEFTBATTLE
+      detect inconsistent BATTLEOPENED/BATTLECLOSED/LEFTBATTLE/UPDATEBOT commands

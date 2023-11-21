@@ -36,7 +36,7 @@ sub notall (&@) { my $c = shift; return defined first {! &$c} @_; }
 
 # Internal data ###############################################################
 
-my $moduleVersion='0.48';
+my $moduleVersion='0.49';
 
 our %sentenceStartPosClient = (
   REQUESTUPDATEFILE => 1,
@@ -1319,7 +1319,8 @@ sub addUserHandler {
                                         away => 0,
                                         access => 0,
                                         bot => 0 },
-                            channels => {} };
+                            channels => {},
+                            battleId => undef };
   $self->{accounts}{$accountId}=$user if($accountId);
   return %{$r_checkParamsRes} ? 0 : 1;
 }
@@ -1327,9 +1328,38 @@ sub addUserHandler {
 sub removeUserHandler {
   my ($self,undef,$user)=@_;
   my $sl=$self->{conf}{simpleLog};
-  if(! exists $self->{users}{$user}) {
+  my $r_lobbyUserData=$self->{users}{$user};
+  if(! defined $r_lobbyUserData) {
     $sl->log("Ignoring REMOVEUSER command (unknown user:\"$user\")",1);
     return 0;
+  }
+  my $rc=1;
+  my $battleId=$r_lobbyUserData->{battleId};
+  if(defined $battleId) {
+    my $r_battleData=$self->{battles}{$battleId};
+    my @userList=@{$r_battleData->{userList}};
+    if($r_battleData->{founder} eq $user) {
+      $sl->log("Missing BATTLECLOSED command before REMOVEUSER (user \"$user\")",2);
+      map {$self->{users}{$_}{battleId}=undef} @userList;
+      delete $self->{battles}{$battleId};
+      $self->{battle}={} if(exists $self->{battle}{battleId} && $self->{battle}{battleId} == $battleId);
+    }else{
+      $sl->log("Missing LEFTBATTLE command before REMOVEUSER (user \"$user\")",2);
+      my $userIndex=aindex(@userList,$user);
+      splice(@userList,$userIndex,1);
+      $self->{battles}{$battleId}{userList}=\@userList;
+      if(exists $self->{battle}{battleId} && $self->{battle}{battleId} == $battleId) {
+        my $r_orphanBots=$self->{battle}{users}{$user}{bots};
+        if(%{$r_orphanBots}) {
+          my @newBotList;
+          map {push(@newBotList,$_) unless(exists $r_orphanBots->{$_})} @{$self->{battle}{botList}};
+          $self->{battle}{botList}=\@newBotList;
+          map {delete $self->{battle}{bots}{$_}} (keys %{$r_orphanBots});
+        }
+        delete $self->{battle}{users}{$user};
+      }
+    }
+    $rc=0;
   }
   my @userChannels = keys %{$self->{users}{$user}{channels}};
   if(@userChannels) {
@@ -1338,7 +1368,7 @@ sub removeUserHandler {
   }
   delete $self->{accounts}{$self->{users}{$user}{accountId}} if($self->{users}{$user}{accountId});
   delete $self->{users}{$user};
-  return 1;
+  return $rc;
 }
 
 sub clientStatusHandler {
@@ -1476,10 +1506,20 @@ sub battleOpenedHandler {
   my ($self,undef,$battleId,$type,$natType,$founder,$ip,$port,$maxPlayers,$passworded,$rank,$mapHash,@otherParams)=@_;
   my $r_checkParamsRes=$self->checkIntParams('BATTLEOPENED',[qw/battleId type natType port maxPlayers passworded rank mapHash/],[\$battleId,\$type,\$natType,\$port,\$maxPlayers,\$passworded,\$rank,\$mapHash]);
   my $sl=$self->{conf}{simpleLog};
-  if(! exists $self->{users}{$founder}) {
+  if(exists $self->{battles}{$battleId}) {
+    $sl->log("Ignoring BATTLEOPENED command (duplicate battle:\"$battleId\")",1);
+    return 0;
+  }
+  my $r_lobbyFounderData=$self->{users}{$founder};
+  if(! defined $r_lobbyFounderData) {
     $sl->log("Ignoring BATTLEOPENED command (unknown founder:\"$founder\")",1);
     return 0;
   }
+  if(defined $r_lobbyFounderData->{battleId}) {
+    $sl->log("Ignoring BATTLEOPENED command (founder already in a battle:\"$founder\")",1);
+    return 0;
+  }
+  $r_lobbyFounderData->{battleId}=$battleId;
   my ($engineName,$engineVersion,$map,$title,$mod);
   if($#otherParams < 4) {
     ($map,$title,$mod)=@otherParams;
@@ -1510,6 +1550,12 @@ sub battleOpenedHandler {
 
 sub battleClosedHandler {
   my ($self,undef,$battleId)=@_;
+  my $sl=$self->{conf}{simpleLog};
+  if(! exists $self->{battles}{$battleId}) {
+    $sl->log("Ignoring BATTLECLOSED command (unknown battle:\"$battleId\")",1);
+    return 0;
+  }
+  map {$self->{users}{$_}{battleId}=undef} (@{$self->{battles}{$battleId}{userList}});
   delete $self->{battles}{$battleId};
   $self->{battle}={} if(exists $self->{battle}{battleId} && $self->{battle}{battleId} == $battleId);
   return 1;
@@ -1522,17 +1568,19 @@ sub joinedBattleHandler {
     $sl->log("Ignoring JOINEDBATTLE command (unknown battle:\"$battleId\")",1);
     return 0;
   }
-  if(! exists $self->{users}{$user}) {
+  my $r_lobbyUserData=$self->{users}{$user};
+  if(! defined $r_lobbyUserData) {
     $sl->log("Ignoring JOINEDBATTLE command (unknown user:\"$user\")",1);
     return 0;
   }
-  if(any {$user eq $_} @{$self->{battles}{$battleId}{userList}}) {
-    $sl->log("Ignoring JOINEDBATTLE command (user already in battle:\"$user\")",1);
+  if(defined $r_lobbyUserData->{battleId}) {
+    $sl->log("Ignoring JOINEDBATTLE command (user is already in a battle:\"$user\")",1);
     return 0;
   }
+  $r_lobbyUserData->{battleId}=$battleId;
   push(@{$self->{battles}{$battleId}{userList}},$user);
-  if(exists $self->{battle}{battleId} && $battleId eq $self->{battle}{battleId}) {
-    $self->{battle}{users}{$user}={battleStatus => undef, color => undef, ip => undef, port => undef, scriptPass => $scriptPass};
+  if(exists $self->{battle}{battleId} && $battleId == $self->{battle}{battleId}) {
+    $self->{battle}{users}{$user}={battleStatus => undef, color => undef, ip => undef, port => undef, scriptPass => $scriptPass, bots => {}};
   }
   return 1;
 }
@@ -1544,19 +1592,39 @@ sub leftBattleHandler {
     $sl->log("Ignoring LEFTBATTLE command (unknown battle:\"$battleId\")",1);
     return 0;
   }
-  my @userList=@{$self->{battles}{$battleId}{userList}};
-  my $userIndex=aindex(@userList,$user);
-  if($userIndex == -1) {
-    $sl->log("Ignoring LEFTBATTLE command (user already out of battle:\"$user\")",1);
+  my $r_lobbyUserData=$self->{users}{$user};
+  if(! defined $r_lobbyUserData) {
+    $sl->log("Ignoring LEFTBATTLE command (unknown user:\"$user\")",1);
     return 0;
   }
+  if(! defined $r_lobbyUserData->{battleId}) {
+    $sl->log("Ignoring LEFTBATTLE command (user is not in a battle:\"$user\")",1);
+    return 0;
+  }
+  if($r_lobbyUserData->{battleId} != $battleId) {
+    $sl->log("Ignoring LEFTBATTLE command (user is in a different battle:\"$user\")",1);
+    return 0;
+  }
+  $r_lobbyUserData->{battleId}=undef;
+  my @userList=@{$self->{battles}{$battleId}{userList}};
+  my $userIndex=aindex(@userList,$user);
   splice(@userList,$userIndex,1);
   $self->{battles}{$battleId}{userList}=\@userList;
-  if(exists $self->{battle}{battleId} && $battleId eq $self->{battle}{battleId}) {
+  my $rc=1;
+  if(exists $self->{battle}{battleId} && $battleId == $self->{battle}{battleId}) {
+    my $r_orphanBots=$self->{battle}{users}{$user}{bots};
+    if(%{$r_orphanBots}) {
+      $sl->log("Missing REMOVEBOT command before LEFTBATTLE (user \"$user\")",2);
+      my @newBotList;
+      map {push(@newBotList,$_) unless(exists $r_orphanBots->{$_})} @{$self->{battle}{botList}};
+      $self->{battle}{botList}=\@newBotList;
+      map {delete $self->{battle}{bots}{$_}} (keys %{$r_orphanBots});
+      $rc=0;
+    }
     delete $self->{battle}{users}{$user};
   }
   $self->{battle}={} if($user eq $self->{login});
-  return 1;
+  return $rc;
 }
 
 sub updateBattleInfoHandler {
@@ -1600,7 +1668,7 @@ sub openBattleHandler {
                       modHash => $self->{openBattleModHash},
                       password => $self->{password} };
   foreach my $user (@{$self->{battles}{$battleId}{userList}}) {
-    $self->{battle}{users}{$user}={battleStatus => undef, color => undef, ip => undef, port => undef};
+    $self->{battle}{users}{$user}={battleStatus => undef, color => undef, ip => undef, port => undef, bots => {}};
   }
   return %{$r_checkParamsRes} ? 0 : 1;
 }
@@ -1629,7 +1697,7 @@ sub joinBattleHandler {
                       modHash => $modHash,
                       password => $self->{password} };
   foreach my $user (@{$self->{battles}{$battleId}{userList}}) {
-    $self->{battle}{users}{$user}={battleStatus => undef, color => undef, ip => undef, port => undef};
+    $self->{battle}{users}{$user}={battleStatus => undef, color => undef, ip => undef, port => undef, bots => {}};
   }
   return 1;
 }
@@ -1747,6 +1815,7 @@ sub addBotHandler {
     $sl->log("Ignoring ADDBOT command (duplicate bot \"$name\")",1);
     return 0;
   }
+  $self->{battle}{users}{$owner}{bots}{$name}=1;
   push(@{$self->{battle}{botList}},$name);
   $self->{battle}{bots}{$name} = { owner => $owner,
                                    battleStatus => $self->unmarshallBattleStatus($battleStatus),
@@ -1774,6 +1843,7 @@ sub removeBotHandler {
   }
   splice(@botList,$botIndex,1);
   $self->{battle}{botList}=\@botList;
+  delete $self->{battle}{users}{$self->{battle}{bots}{$name}{owner}}{bots}{$name};
   delete $self->{battle}{bots}{$name};
   return 1;
 }
@@ -1857,6 +1927,10 @@ sub updateBotHandler {
   }
   if($battleId != $self->{battle}{battleId}) {
     $sl->log("Ignoring UPDATEBOT command (wrong battle ID:\"$battleId\")",1);
+    return 0;
+  }
+  if(! exists $self->{battle}{bots}{$name}) {
+    $sl->log("Ignoring UPDATEBOT command (unknown bot name \"$name\")",1);
     return 0;
   }
   my $r_newBotBattleStatus=$self->unmarshallBattleStatus($battleStatus);
