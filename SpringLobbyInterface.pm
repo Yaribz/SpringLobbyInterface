@@ -36,7 +36,7 @@ sub notall (&@) { my $c = shift; return defined first {! &$c} @_; }
 
 # Internal data ###############################################################
 
-my $moduleVersion='0.49';
+my $moduleVersion='0.50';
 
 our %sentenceStartPosClient = (
   REQUESTUPDATEFILE => 1,
@@ -888,6 +888,7 @@ sub connect {
 
 sub gracefulSocketShutdown {
   my $socket=shift;
+  local $SIG{PIPE} = 'IGNORE';
   shutdown($socket,1);
   my $timeoutTime=time+5;
   my $nbLingerPackets=0;
@@ -956,7 +957,11 @@ sub sendCommand {
   my $lobbySock=$self->{lobbySock};
   my $command=$self->marshallCommand($p_command);
   $sl->log("Sending to lobby server: \"$command\"",5);
-  my $printRc=print $lobbySock "$command\cJ";
+  my $printRc;
+  {
+    local $SIG{PIPE} = 'IGNORE';
+    $printRc=print $lobbySock "$command\cJ";
+  }
   if(! defined $printRc) {
     $sl->log("Failed to send following command to lobby server \"$command\" ($!)",1);
     return 0;
@@ -1000,8 +1005,11 @@ sub receiveCommand {
   }
   return $self->doTlsHandshake() if($self->{performingTlsHandshake});
   my $lobbySock=$self->{lobbySock};
-  my $data;
-  my $readLength=$lobbySock->sysread($data,4096);
+  my ($readLength,$data);
+  {
+    local $SIG{PIPE} = 'IGNORE';
+    $readLength=$lobbySock->sysread($data,4096);
+  }
   my $readError;
   if(defined $readLength) {
     if($readLength) {

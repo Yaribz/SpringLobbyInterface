@@ -99,3 +99,4 @@ SpringLobbyInterface.pm:
 0.49: detect commands BATTLECLOSED/LEFTBATTLE missing before REMOVEUSER
       detect commands REMOVEBOT missing before LEFTBATTLE
       detect inconsistent BATTLEOPENED/BATTLECLOSED/LEFTBATTLE/UPDATEBOT commands
+0.50: ignore SIGPIPE signals during I/O operations on lobby socket (TLS can induce writes during read operations)
