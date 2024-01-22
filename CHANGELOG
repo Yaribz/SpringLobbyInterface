@@ -100,3 +100,4 @@ SpringLobbyInterface.pm:
       detect commands REMOVEBOT missing before LEFTBATTLE
       detect inconsistent BATTLEOPENED/BATTLECLOSED/LEFTBATTLE/UPDATEBOT commands
 0.50: ignore SIGPIPE signals during I/O operations on lobby socket (TLS can induce writes during read operations)
+0.51: add support for optional lobby protocol extensions declaration from server

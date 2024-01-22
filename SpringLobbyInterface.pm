@@ -1,7 +1,7 @@
 # Object-oriented Perl module implementing a callback-based interface to
 # communicate with SpringRTS lobby server.
 #
-# Copyright (C) 2008-2023  Yann Riou <yaribzh@gmail.com>
+# Copyright (C) 2008-2024  Yann Riou <yaribzh@gmail.com>
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -21,9 +21,10 @@ package SpringLobbyInterface;
 
 use strict;
 
+use Digest::MD5 "md5_base64";
 use IO::Select;
 use IO::Socket::INET;
-use Digest::MD5 "md5_base64";
+use JSON::PP ();
 use List::Util qw'first shuffle';
 use Storable "dclone";
 
@@ -36,7 +37,10 @@ sub notall (&@) { my $c = shift; return defined first {! &$c} @_; }
 
 # Internal data ###############################################################
 
-my $moduleVersion='0.50';
+my $moduleVersion='0.51';
+
+use constant { PROTOCOL_EXTENSIONS_PREFIX => '@PROTOCOL_EXTENSIONS@ ' };
+use constant { PROTOCOL_EXTENSIONS_PREFIX_LENGTH => length(PROTOCOL_EXTENSIONS_PREFIX) };
 
 our %sentenceStartPosClient = (
   REQUESTUPDATEFILE => 1,
@@ -143,7 +147,8 @@ our %commandHandlers = (
   ADDSTARTRECT => \&addStartRectHandler,
   REMOVESTARTRECT => \&removeStartRectHandler,
   SETSCRIPTTAGS => \&setScriptTagsHandler,
-  REMOVESCRIPTTAGS => \&removeScriptTagsHandler
+  REMOVESCRIPTTAGS => \&removeScriptTagsHandler,
+  SERVERMSG => \&serverMsgHandler,
 );
 
 my $tlsAvailable; # checked only when needed to avoid loading IO::Socket::SSL if not required
@@ -179,6 +184,7 @@ sub new {
     conf => $p_conf,
     lobbySock => undef,
     compatFlags => {},
+    protocolExtensions => {},
     readBuffer => '',
     login => undef,
     serverParams => {},
@@ -917,6 +923,7 @@ sub disconnect {
   }
   $self->{login}=undef;
   $self->{compatFlags}={};
+  $self->{protocolExtensions}={};
   $self->{serverParams}={};
   $self->{users}={};
   $self->{accounts}={};
@@ -1200,6 +1207,23 @@ sub tasserverHandler {
     return 0;
   }
   return %{$r_checkParamsRes} ? 0 : 1;
+}
+
+sub serverMsgHandler {
+  my ($self,undef,$msg)=@_;
+  return 1 unless(substr($msg,0,PROTOCOL_EXTENSIONS_PREFIX_LENGTH) eq PROTOCOL_EXTENSIONS_PREFIX);
+  my $sl=$self->{conf}{simpleLog};
+  my $r_protExt;
+  eval { $r_protExt=JSON::PP::decode_json(substr($msg,PROTOCOL_EXTENSIONS_PREFIX_LENGTH)) };
+  if($@) {
+    $sl->log('Invalid JSON data in protocol extensions declaration received from lobby server',2);
+    return 0;
+  }elsif(ref $r_protExt ne 'HASH') {
+    $sl->log('Invalid data in protocol extensions declaration received from lobby server',2);
+    return 0;
+  }
+  map {$self->{protocolExtensions}{$_}=$r_protExt->{$_}} (keys %{$r_protExt});
+  return 1;
 }
 
 sub startTls {
