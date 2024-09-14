@@ -25,81 +25,18 @@ use Digest::MD5 "md5_base64";
 use IO::Select;
 use IO::Socket::INET;
 use JSON::PP ();
-use List::Util qw'first shuffle';
+use List::Util 'any';
 use Storable "dclone";
 
 use SimpleLog;
-
-sub any (&@) { my $c = shift; return defined first {&$c} @_; }
-sub all (&@) { my $c = shift; return ! defined first {! &$c} @_; }
-sub none (&@) { my $c = shift; return ! defined first {&$c} @_; }
-sub notall (&@) { my $c = shift; return defined first {! &$c} @_; }
+use SpringLobbyProtocol;
 
 # Internal data ###############################################################
 
-my $moduleVersion='0.51';
+my $moduleVersion='0.52';
 
 use constant { PROTOCOL_EXTENSIONS_PREFIX => '@PROTOCOL_EXTENSIONS@ ' };
 use constant { PROTOCOL_EXTENSIONS_PREFIX_LENGTH => length(PROTOCOL_EXTENSIONS_PREFIX) };
-
-our %sentenceStartPosClient = (
-  REQUESTUPDATEFILE => 1,
-  LOGIN => 5,
-  CHANNELTOPIC => 2,
-  FORCELEAVECHANNEL => 3,
-  SAY => 2,
-  SAYEX => 2,
-  SAYPRIVATE => 2,
-  SAYPRIVATEEX => 2,
-  OPENBATTLE => 9,
-  UPDATEBATTLEINFO => 4,
-  SAYBATTLE => 1,
-  SAYBATTLEPRIVATE => 2,
-  SAYBATTLEEX => 1,
-  SAYBATTLEPRIVATEEX => 2,
-  ADDBOT => 4,
-  SCRIPT => 1,
-  SETSCRIPTTAGS => 1,
-  JOINBATTLEDENY => 2
-);
-
-our %sentenceStartPosServer = (
-  REGISTRATIONDENIED => 1,
-  DENIED => 1,
-  AGREEMENT => 1,
-  MOTD => 1,
-  OFFERFILE => 2,
-  SERVERMSG => 1,
-  SERVERMSGBOX => 1,
-  ADDUSER => 4,
-  JOINFAILED => 2,
-  MUTELIST => 1,
-  CHANNELTOPIC => 4,
-  CLIENTS => 2,
-  LEFT => 3,
-  FORCELEAVECHANNEL => 3,
-  SAID => 3,
-  SAIDEX => 3,
-  SAYPRIVATE => 2,
-  SAYPRIVATEEX => 2,
-  SAIDPRIVATE => 2,
-  SAIDPRIVATEEX => 2,
-  BATTLEOPENED => 11,
-  JOINBATTLEFAILED => 1,
-  OPENBATTLEFAILED => 1,
-  UPDATEBATTLEINFO => 5,
-  SAIDBATTLE => 2,
-  SAIDBATTLEEX => 2,
-  BROADCAST => 1,
-  ADDBOT => 6,
-  MAPGRADESFAILED => 1,
-  SCRIPT => 1,
-  SETSCRIPTTAGS => 1,
-  CHANNELMESSAGE => 2,
-  CHANNEL => 3
-);
-
-our @tabWorkaroundCommands = qw/CHANNELTOPIC SAID SAIDEX SAIDPRIVATE SAIDPRIVATEEX SAIDBATTLE SAIDBATTLEEX SAYPRIVATE SAYPRIVATEEX/;
 
 our %commandHooks = (
   LOGIN => \&loginHook,
@@ -249,141 +186,44 @@ sub getRunningBattle {
 
 # Marshallers/unmarshallers ###################################################
 
-sub marshallPasswd {
-  my ($self,$passwd) = @_;
-  return md5_base64($passwd)."==";
-}
+sub marshallPasswd { SpringLobbyProtocol::marshallPasswd($_[1]) }
 
-sub marshallClientStatus {
-  my ($self,$p_clientStatus)=@_;
-  my %cs=%{$p_clientStatus};
-  return oct("0b".$cs{bot}.$cs{access}.sprintf("%03b",$cs{rank}).$cs{away}.$cs{inGame});
-}
+sub marshallClientStatus { SpringLobbyProtocol::marshallClientStatus($_[1]) }
 
-sub unmarshallClientStatus {
-  my ($self,$clientStatus)=@_;
-  my $csBin=sprintf("%07b",$clientStatus);
-  my @cs=split("",$csBin);
-  my $offset=0;
-  $offset=$#cs-6 if($#cs>6);
-  return { inGame => $cs[$offset+6]+0,
-           away => $cs[$offset+5]+0,
-           rank => oct("0b".$cs[$offset+2].$cs[$offset+3].$cs[$offset+4]),
-           access =>$cs[$offset+1]+0,
-           bot => $cs[$offset]+0 };
-}
+sub unmarshallClientStatus { SpringLobbyProtocol::unmarshallClientStatus($_[1]) }
 
 sub marshallBattleStatus {
-  my ($self,$p_battleStatus)=@_;
-  my %bs=%{$p_battleStatus};
   my @workaroundStrings;
-  if($bs{team} > 15) {
-    push(@workaroundStrings,"team=$bs{team}");
-    $bs{team}%=16;
+  foreach my $f (qw'team id') {
+    my $v=$_[1]{$f};
+    push(@workaroundStrings,"$f=$v") if($v > 15);
   }
-  if($bs{id} > 15) {
-    push(@workaroundStrings,"id=$bs{id}");
-    $bs{id}%=16;
-  }
-  my $res=oct("0b0000".sprintf("%04b",$bs{side}).sprintf("%02b",$bs{sync})."0000".sprintf("%07b",$bs{bonus}).$bs{mode}.sprintf("%04b",$bs{team}).sprintf("%04b",$bs{id}).$bs{ready}."0");
+  my $res=SpringLobbyProtocol::marshallBattleStatus($_[1]);
   $res.='('.join(';',@workaroundStrings).')' if(@workaroundStrings);
   return $res;
 }
 
-sub unmarshallBattleStatus {
-  my ($self,$battleStatus)=@_;
-  $battleStatus+=2147483648 if($battleStatus < 0);
-  my $bsBin=sprintf("%032b",$battleStatus);
-  my @bs=split("",$bsBin);
-  return { side => oct("0b".$bs[4].$bs[5].$bs[6].$bs[7]),
-           sync => oct("0b".$bs[8].$bs[9]),
-           bonus => oct("0b".$bs[14].$bs[15].$bs[16].$bs[17].$bs[18].$bs[19].$bs[20]),
-           mode => $bs[21]+0,
-           team => oct("0b".$bs[22].$bs[23].$bs[24].$bs[25]),
-           id => oct("0b".$bs[26].$bs[27].$bs[28].$bs[29]),
-           ready => $bs[30]+0 };
-}
+sub unmarshallBattleStatus { SpringLobbyProtocol::unmarshallBattleStatus($_[1]) }
 
-sub marshallColor {
-  my ($self,$p_color)=@_;
-  return ($p_color->{blue}*65536)+$p_color->{green}*256+$p_color->{red};
-}
+sub marshallColor { SpringLobbyProtocol::marshallColor($_[1]) }
 
-sub unmarshallColor {
-  my ($self,$color)=@_;
-  return { red => $color & 255,
-           green => ($color >> 8) & 255,
-           blue => ($color >> 16) & 255 };
-}
+sub unmarshallColor { SpringLobbyProtocol::unmarshallColor($_[1]) }
 
 sub marshallCommand {
   my ($self,$p_unmarshalled)=@_;
-  my @unmarshalled=@{$p_unmarshalled};
-  my $marshalled=$unmarshalled[0];
-  my $command=$marshalled;
-  if($command =~ /^\#\d+\s+([^\s]+)$/) {
-    $command=$1;
-  }
-  my $sentencePos=$#unmarshalled+1;
-  if(exists $sentenceStartPosClient{$command}) {
-    $sentencePos=$sentenceStartPosClient{$command};
-  }
-  for my $i (1..$#unmarshalled) {
-    $unmarshalled[$i] =~ s/\t/    /g unless(grep {/^$command$/} @tabWorkaroundCommands);
-    if($i > $sentencePos) {
-      $marshalled.="\t";
-    }else{
-      $marshalled.=" ";
-    }
-    $marshalled.=$unmarshalled[$i];
-  }
+  my $sl=$self->{conf}{simpleLog};
+  my $marshalled = eval { SpringLobbyProtocol::marshallClientCommand($p_unmarshalled) };
+  do { chomp($@); $sl->log("Unable to marshall command ($@)",1) } unless(defined $marshalled);
   return $marshalled;
 }
 
 sub unmarshallCommand {
   my ($self,$marshalled)=@_;
   my $sl=$self->{conf}{simpleLog};
-  my $command="";
-  my $marshalledParams="";
-  if($marshalled =~ /^((?:\#\d+ +)?[^ ]+)((?: .*)?)$/) {
-    $command=uc($1);
-    $marshalledParams=$2;
-  }else{
-    $sl->log("Unable to unmarshall command \"$marshalled\"",1);
-    return [$marshalled];
-  }
-  return [$command] unless($marshalledParams ne "");
-  $marshalledParams=~s/^ //;
-  my $realCommand=$command;
-  if($command =~ /^\#\d+ +([^ ]+)$/) {
-    $realCommand=$1;
-  }
-  my $sentenceStartPos=0;
-  $sentenceStartPos=$sentenceStartPosServer{$realCommand} if(exists $sentenceStartPosServer{$realCommand});
-  my @unmarshalledParams=$self->unmarshallParams($marshalledParams,$sentenceStartPos,$realCommand);
-  my @unmarshalled=($command,@unmarshalledParams);
-  return \@unmarshalled;
-}
-
-sub unmarshallParams {
-  my ($self,$marshalledParams,$sentencePos,$command)=@_;
-  my $sl=$self->{conf}{simpleLog};
-  if($sentencePos != 1) {
-    return ($marshalledParams) unless($marshalledParams =~ / /);
-    if($marshalledParams =~ /^([^ ]*) (.*)$/) {
-      my $param=$1;
-      return ($param,$self->unmarshallParams($2,$sentencePos-1,$command));
-    }else{
-      $sl->log("Unable to unmarshall parameters \"$marshalledParams\"",1);
-      return ($marshalledParams);
-    }
-  }else{
-    if(grep {/^$command$/} @tabWorkaroundCommands) {
-      return ($marshalledParams);
-    }else{
-      return split("\t",$marshalledParams);
-    }
-  } 
+  my ($r_cmd,$cmdId) = eval { SpringLobbyProtocol::unmarshallServerCommand($marshalled) };
+  do { chomp($@); $sl->log("Unable to unmarshall command \"$marshalled\" ($@)",1); return [$marshalled] } unless(defined $r_cmd);
+  $r_cmd->[0]='#'.$cmdId.' '.$r_cmd->[0] if(defined $cmdId);
+  return $r_cmd;
 }
 
 # Helper ######################################################################
@@ -963,14 +803,16 @@ sub sendCommand {
   }
   my $lobbySock=$self->{lobbySock};
   my $command=$self->marshallCommand($p_command);
-  $sl->log("Sending to lobby server: \"$command\"",5);
+  my $cmdText=$command;
+  chomp($cmdText);
+  $sl->log("Sending to lobby server: \"$cmdText\"",5);
   my $printRc;
   {
     local $SIG{PIPE} = 'IGNORE';
-    $printRc=print $lobbySock "$command\cJ";
+    $printRc=print $lobbySock $command;
   }
   if(! defined $printRc) {
-    $sl->log("Failed to send following command to lobby server \"$command\" ($!)",1);
+    $sl->log("Failed to send following command to lobby server \"$cmdText\" ($!)",1);
     return 0;
   }
   $self->{lastSndTs}=time;
@@ -1316,7 +1158,6 @@ sub loginHook {
   if(defined $flagString) {
     my @flags=split(' ',$flagString);
     @{$self->{compatFlags}}{@flags}=(1) x @flags;
-    $sentenceStartPosServer{CHANNELTOPIC}=3 if(exists $self->{compatFlags}{t});
   }
 }
 
@@ -2008,6 +1849,7 @@ sub setScriptTagsHandler {
     $sl->log("Ignoring SETSCRIPTTAGS command (currently out of any battle)",1);
     return 0;
   }
+  return 1 if(@scriptTags == 1 && $scriptTags[0] eq '');
   foreach my $tagValue (@scriptTags) {
     if($tagValue =~ /^\s*([^=]*[^=\s])\s*=\s*((?:.*[^\s])?)\s*$/) {
       $self->{battle}{scriptTags}{$1}=$2;
