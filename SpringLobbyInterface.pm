@@ -33,7 +33,7 @@ use SpringLobbyProtocol;
 
 # Internal data ###############################################################
 
-my $moduleVersion='0.52';
+my $moduleVersion='0.53';
 
 use constant { PROTOCOL_EXTENSIONS_PREFIX => '@PROTOCOL_EXTENSIONS@ ' };
 use constant { PROTOCOL_EXTENSIONS_PREFIX_LENGTH => length(PROTOCOL_EXTENSIONS_PREFIX) };
@@ -193,6 +193,7 @@ sub marshallClientStatus { SpringLobbyProtocol::marshallClientStatus($_[1]) }
 sub unmarshallClientStatus { SpringLobbyProtocol::unmarshallClientStatus($_[1]) }
 
 sub marshallBattleStatus {
+  return SpringLobbyProtocol::marshallBattleStatusEx($_[1]) if($_[0]{protocolExtensions}{'battleStatus:teams-8bit'});
   my @workaroundStrings;
   foreach my $f (qw'team id') {
     my $v=$_[1]{$f};
@@ -203,7 +204,7 @@ sub marshallBattleStatus {
   return $res;
 }
 
-sub unmarshallBattleStatus { SpringLobbyProtocol::unmarshallBattleStatus($_[1]) }
+sub unmarshallBattleStatus { $_[0]{protocolExtensions}{'battleStatus:teams-8bit'} ? SpringLobbyProtocol::unmarshallBattleStatusEx($_[1]) : SpringLobbyProtocol::unmarshallBattleStatus($_[1]) }
 
 sub marshallColor { SpringLobbyProtocol::marshallColor($_[1]) }
 
@@ -1615,7 +1616,7 @@ sub clientBattleStatusHandler {
     return 0;
   }
   my $r_newClientBattleStatus=$self->unmarshallBattleStatus($battleStatus);
-  if(defined $self->{battle}{users}{$user}{battleStatus}) {
+  if(! $self->{protocolExtensions}{'battleStatus:teams-8bit'} && defined $self->{battle}{users}{$user}{battleStatus}) {
     if(exists $self->{battle}{users}{$user}{battleStatus}{workaroundTeam}
        && $r_newClientBattleStatus->{team} % 16 == $self->{battle}{users}{$user}{battleStatus}{workaroundTeam} % 16) {
       $r_newClientBattleStatus->{workaroundTeam}=$self->{battle}{users}{$user}{battleStatus}{workaroundTeam};
@@ -1724,6 +1725,8 @@ sub removeBotHandler {
 sub updateBotHook {
   my ($self,$name,$marshalledStatus)=@_[0,2,3];
 
+  return if($self->{protocolExtensions}{'battleStatus:teams-8bit'});
+  
   my @workaroundStrings;
   if($marshalledStatus =~ /^(\d+)\((.+)\)$/) {
     $_[3]=$1;
@@ -1757,6 +1760,9 @@ sub updateBotHook {
 
 sub forceAllyNoHook {
   my ($self,$name,$teamNb)=@_[0,2,3];
+  
+  return if($self->{protocolExtensions}{'battleStatus:teams-8bit'});
+  
   $teamNb+=0;
   $_[3]%=16;
   my $sl=$self->{conf}{simpleLog};
@@ -1775,6 +1781,9 @@ sub forceAllyNoHook {
 
 sub forceTeamNoHook {
   my ($self,$name,$idNb)=@_[0,2,3];
+  
+  return if($self->{protocolExtensions}{'battleStatus:teams-8bit'});
+  
   $idNb+=0;
   $_[3]%=16;
   my $sl=$self->{conf}{simpleLog};
@@ -1807,7 +1816,7 @@ sub updateBotHandler {
     return 0;
   }
   my $r_newBotBattleStatus=$self->unmarshallBattleStatus($battleStatus);
-  if(defined $self->{battle}{bots}{$name}{battleStatus}) {
+  if(! $self->{protocolExtensions}{'battleStatus:teams-8bit'} && defined $self->{battle}{bots}{$name}{battleStatus}) {
     if(exists $self->{battle}{bots}{$name}{battleStatus}{workaroundTeam}
        && $r_newBotBattleStatus->{team} % 16 == $self->{battle}{bots}{$name}{battleStatus}{workaroundTeam} % 16) {
       $r_newBotBattleStatus->{workaroundTeam}=$self->{battle}{bots}{$name}{battleStatus}{workaroundTeam};
