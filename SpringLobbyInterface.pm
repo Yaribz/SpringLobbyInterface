@@ -33,7 +33,7 @@ use SpringLobbyProtocol;
 
 # Internal data ###############################################################
 
-my $moduleVersion='0.53';
+my $moduleVersion='0.54';
 
 use constant { PROTOCOL_EXTENSIONS_PREFIX => '@PROTOCOL_EXTENSIONS@ ' };
 use constant { PROTOCOL_EXTENSIONS_PREFIX_LENGTH => length(PROTOCOL_EXTENSIONS_PREFIX) };
@@ -804,6 +804,7 @@ sub sendCommand {
   }
   my $lobbySock=$self->{lobbySock};
   my $command=$self->marshallCommand($p_command);
+  return 0 unless(defined $command);
   my $cmdText=$command;
   chomp($cmdText);
   $sl->log("Sending to lobby server: \"$cmdText\"",5);
