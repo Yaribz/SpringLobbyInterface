@@ -33,7 +33,7 @@ use SpringLobbyProtocol;
 
 # Internal data ###############################################################
 
-my $moduleVersion='0.54';
+my $moduleVersion='0.55';
 
 use constant { PROTOCOL_EXTENSIONS_PREFIX => '@PROTOCOL_EXTENSIONS@ ' };
 use constant { PROTOCOL_EXTENSIONS_PREFIX_LENGTH => length(PROTOCOL_EXTENSIONS_PREFIX) };
@@ -1135,7 +1135,7 @@ sub doTlsHandshake {
     if($tlsCertifHash =~ /^sha256\$([\da-fA-F]+)$/) {
       $self->{tlsCertifHash}=lc($1);
       $sl->log('TLS enabled ('.($lobbySock->get_sslversion()).','.($lobbySock->get_cipher()).')',3);
-      $sl->log("TLS server certificate fingerpint (SHA-256): $self->{tlsCertifHash}",5);
+      $sl->log("TLS server certificate fingerprint (SHA-256): $self->{tlsCertifHash}",5);
     }else{
       $sl->log("Invalid TLS server certificate fingerprint: \"$tlsCertifHash\"",1);
     }
@@ -1357,11 +1357,12 @@ sub leftHandler {
     return 0;
   }
   if($user eq $self->{login}) {
+    delete $self->{users}{$_}{channels}{$channel} foreach(keys %{$self->{channels}{$channel}{users}});
     delete $self->{channels}{$channel};
   }else{
+    delete $self->{users}{$user}{channels}{$channel};
     delete $self->{channels}{$channel}{users}{$user};
   }
-  delete $self->{users}{$user}{channels}{$channel};
   return 1;
 }
 

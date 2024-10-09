@@ -104,3 +104,5 @@ SpringLobbyInterface.pm:
 0.52: move marshallers/unmarshallers to a dedicated module "SpringLobbyProtocol" to ease code factorization between client and server implementations
 0.53: add support for "battleStatus:teams-8bit" lobby protocol extension (use 8 bits to encode team numbers and ally team numbers in battle status bitfield, increasing max values from 15 to 255)
 0.54: fix handling of cases where lobby command cannot be sent due to error in marshalling function
+0.55: fix minor memory leak when leaving a chat channel (membership data of the other users in channel wasn't correctly cleared)
+      fix typo in a debug message
