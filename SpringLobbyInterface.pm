@@ -1,7 +1,7 @@
 # Object-oriented Perl module implementing a callback-based interface to
 # communicate with SpringRTS lobby server.
 #
-# Copyright (C) 2008-2024  Yann Riou <yaribzh@gmail.com>
+# Copyright (C) 2008-2025  Yann Riou <yaribzh@gmail.com>
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -33,7 +33,7 @@ use SpringLobbyProtocol;
 
 # Internal data ###############################################################
 
-my $moduleVersion='0.55';
+my $moduleVersion='0.56';
 
 use constant { PROTOCOL_EXTENSIONS_PREFIX => '@PROTOCOL_EXTENSIONS@ ' };
 use constant { PROTOCOL_EXTENSIONS_PREFIX_LENGTH => length(PROTOCOL_EXTENSIONS_PREFIX) };
@@ -930,14 +930,14 @@ sub receiveCommand {
       }
     }
 
-    my ($handlerTime,$callbackTime);
+    my ($handlerTime,$callbackTime,$mustBypassCallbacks);
     if(exists($commandHandlers{$realCommandName})) {
       $processed=1;
       $handlerTime=time;
       if($commandHandlers{$realCommandName}) {
         my $handlerRc=&{$commandHandlers{$realCommandName}}($self,@{$p_command});
         $rc = $handlerRc && $rc;
-        &{$r_conf->{inconsistencyHandler}}($realCommandName,$marshalledCommand) if(! $handlerRc && $r_conf->{inconsistencyHandler});
+        $mustBypassCallbacks=&{$r_conf->{inconsistencyHandler}}($realCommandName,$marshalledCommand) if(! $handlerRc && $r_conf->{inconsistencyHandler});
       }
       $handlerTime=time-$handlerTime;
     }
@@ -948,7 +948,7 @@ sub receiveCommand {
     if(exists($self->{callbacks}{$commandName})) {
       $cName=$commandName;
     }
-    if(exists($self->{callbacks}{$cName})) {
+    if(exists($self->{callbacks}{$cName}) && ! $mustBypassCallbacks) {
       foreach my $prio (sort prioSort (keys %{$self->{callbacks}{$cName}})) {
         my ($callback,$nbCalls)=@{$self->{callbacks}{$cName}{$prio}};
         $processed=1;
@@ -987,7 +987,7 @@ sub receiveCommand {
     if(exists($self->{pendingResponses}{$commandName})) {
       $cName=$commandName;
     }
-    if(exists($self->{pendingResponses}{$cName})) {
+    if(exists($self->{pendingResponses}{$cName}) && ! $mustBypassCallbacks) {
       my $request=$self->{pendingResponses}{$cName};
       my ($p_callbacks,$timeout,$p_timeoutCallback)=@{$self->{pendingRequests}{$request}};
       my $callback=$p_callbacks->{$cName};

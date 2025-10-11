@@ -106,3 +106,4 @@ SpringLobbyInterface.pm:
 0.54: fix handling of cases where lobby command cannot be sent due to error in marshalling function
 0.55: fix minor memory leak when leaving a chat channel (membership data of the other users in channel wasn't correctly cleared)
       fix typo in a debug message
+0.56: the return value of the inconsistencyHandler function is now used to determine whether callbacks must be skipped when inconsistent commands are received from lobby server
