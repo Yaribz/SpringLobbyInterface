@@ -1,7 +1,7 @@
 # Object-oriented Perl module implementing a callback-based interface to
 # communicate with SpringRTS lobby server.
 #
-# Copyright (C) 2008-2025  Yann Riou <yaribzh@gmail.com>
+# Copyright (C) 2008-2026  Yann Riou <yaribzh@gmail.com>
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -33,7 +33,7 @@ use SpringLobbyProtocol;
 
 # Internal data ###############################################################
 
-my $moduleVersion='0.56';
+my $moduleVersion='0.57';
 
 use constant { PROTOCOL_EXTENSIONS_PREFIX => '@PROTOCOL_EXTENSIONS@ ' };
 use constant { PROTOCOL_EXTENSIONS_PREFIX_LENGTH => length(PROTOCOL_EXTENSIONS_PREFIX) };
@@ -877,12 +877,16 @@ sub receiveCommand {
     $sl->log($readError,2);
     if(exists($self->{preCallbacks}{'_DISCONNECT_'})) {
       foreach my $prio (sort prioSort (keys %{$self->{preCallbacks}{'_DISCONNECT_'}})) {
+        last unless(exists $self->{preCallbacks}{'_DISCONNECT_'}); # callbacks can remove other callbacks
+        next unless(exists $self->{preCallbacks}{'_DISCONNECT_'}{$prio});
         my $p_preCallback=$self->{preCallbacks}{'_DISCONNECT_'}{$prio};
         &{$p_preCallback}() if($p_preCallback);
       }
     }
-    if(exists $self->{callbacks}{"_DISCONNECT_"}) {
+    if(exists $self->{callbacks}{'_DISCONNECT_'}) {
       foreach my $prio (sort prioSort (keys %{$self->{callbacks}{'_DISCONNECT_'}})) {
+        last unless(exists $self->{callbacks}{'_DISCONNECT_'}); # callbacks can remove other callbacks
+        next unless(exists $self->{callbacks}{'_DISCONNECT_'}{$prio});
         &{$self->{callbacks}{'_DISCONNECT_'}{$prio}}();
       }
     }
@@ -917,6 +921,8 @@ sub receiveCommand {
     
     if(exists($self->{preCallbacks}{'_ALL_'})) {
       foreach my $prio (sort prioSort (keys %{$self->{preCallbacks}{'_ALL_'}})) {
+        last unless(exists $self->{preCallbacks}{'_ALL_'}); # callbacks can remove other callbacks
+        next unless(exists $self->{preCallbacks}{'_ALL_'}{$prio});
         $processed=1;
         my $p_preCallback=$self->{preCallbacks}{'_ALL_'}{$prio};
         &{$p_preCallback}(@{$p_command}) if($p_preCallback);
@@ -924,6 +930,8 @@ sub receiveCommand {
     }
     if(exists($self->{preCallbacks}{$realCommandName})) {
       foreach my $prio (sort prioSort (keys %{$self->{preCallbacks}{$realCommandName}})) {
+        last unless(exists $self->{preCallbacks}{$realCommandName}); # callbacks can remove other callbacks
+        next unless(exists $self->{preCallbacks}{$realCommandName}{$prio});
         $processed=1;
         my $p_preCallback=$self->{preCallbacks}{$realCommandName}{$prio};
         &{$p_preCallback}(@{$p_command}) if($p_preCallback);
@@ -950,6 +958,8 @@ sub receiveCommand {
     }
     if(exists($self->{callbacks}{$cName}) && ! $mustBypassCallbacks) {
       foreach my $prio (sort prioSort (keys %{$self->{callbacks}{$cName}})) {
+        last unless(exists $self->{callbacks}{$cName}); # callbacks can remove other callbacks
+        next unless(exists $self->{callbacks}{$cName}{$prio});
         my ($callback,$nbCalls)=@{$self->{callbacks}{$cName}{$prio}};
         $processed=1;
         if($nbCalls == 1) {
@@ -962,7 +972,8 @@ sub receiveCommand {
         $rc = &{$callback}(@{$p_command}) && $rc if($callback);
         $callbackTime=time-$callbackTime;
       }
-      delete $self->{callbacks}{$cName} unless(%{$self->{callbacks}{$cName}});
+      # callbacks can remove themselves or other callbacks
+      delete $self->{callbacks}{$cName} if(exists $self->{callbacks}{$cName} && ! %{$self->{callbacks}{$cName}});
     }
     if(defined $handlerTime) {
       if(defined $callbackTime) {
