@@ -33,7 +33,7 @@ use SpringLobbyProtocol;
 
 # Internal data ###############################################################
 
-my $moduleVersion='0.57';
+my $moduleVersion='0.58';
 
 use constant { PROTOCOL_EXTENSIONS_PREFIX => '@PROTOCOL_EXTENSIONS@ ' };
 use constant { PROTOCOL_EXTENSIONS_PREFIX_LENGTH => length(PROTOCOL_EXTENSIONS_PREFIX) };
@@ -337,6 +337,17 @@ sub generateStartData {
   my @orderedBots = sort { $battleData{bots}{$a}{battleStatus}{id} <=> $battleData{bots}{$b}{battleStatus}{id} } @{$battleData{botList}};
   $battleData{botList}=\@orderedBots;
 
+  # Number ally teams in lobby ally team order (only the first entity seen for
+  # each ID is taken into account, as it is the one deciding the team settings)
+  my (%seenIds,%lobbyAllyTeams);
+  foreach my $p_battleStatus (map {$battleData{users}{$_}{battleStatus}} @orderedPlayers) {
+    $lobbyAllyTeams{$p_battleStatus->{team}}=1 unless($seenIds{$p_battleStatus->{id}}++);
+  }
+  foreach my $p_battleStatus (map {$battleData{bots}{$_}{battleStatus}} @orderedBots) {
+    $lobbyAllyTeams{$p_battleStatus->{team}}=1 unless($seenIds{$p_battleStatus->{id}}++);
+  }
+  $allyTeamsMap{$_}=$nextAllyTeam++ foreach(sort {$a <=> $b} keys %lobbyAllyTeams);
+
   for my $userIndex (0..$#{$battleData{userList}}) {
     my $user=$battleData{userList}->[$userIndex];
     $myPlayerNum=$userIndex if($user eq $self->{login});
@@ -347,19 +358,12 @@ sub generateStartData {
         $p_battleStatus->{side}=$#{$p_sides};
       }
       if(! exists $teamsMap{$p_battleStatus->{id}}) {
-        my $allyTeam;
-        if(! exists $allyTeamsMap{$p_battleStatus->{team}}) {
-          $allyTeam=$nextAllyTeam++;
-          $allyTeamsMap{$p_battleStatus->{team}}=$allyTeam;
-        }else{
-          $allyTeam=$allyTeamsMap{$p_battleStatus->{team}};
-        }
         my $p_color = $battleData{users}{$user}{color};
         my $red=sprintf("%.5f",($p_color->{red} / 255));
         my $blue=sprintf("%.5f",($p_color->{blue} / 255));
         my $green=sprintf("%.5f",($p_color->{green} / 255));
         $teamsData{$nextTeam}= { TeamLeader => $userIndex,
-                                 AllyTeam => $allyTeam,
+                                 AllyTeam => $allyTeamsMap{$p_battleStatus->{team}},
                                  RgbColor => "$red $green $blue",
                                  Side => $p_sides->[$p_battleStatus->{side}],
                                  Handicap => $p_battleStatus->{bonus} };
@@ -376,18 +380,11 @@ sub generateStartData {
       $p_battleStatus->{side}=$#{$p_sides};
     }
     if(! exists $teamsMap{$p_battleStatus->{id}}) {
-      my $allyTeam;
-      if(! exists $allyTeamsMap{$p_battleStatus->{team}}) {
-        $allyTeam=$nextAllyTeam++;
-        $allyTeamsMap{$p_battleStatus->{team}}=$allyTeam;
-      }else{
-        $allyTeam=$allyTeamsMap{$p_battleStatus->{team}};
-      }
       my $p_color = $battleData{bots}{$bot}{color};
       my $red=sprintf("%.5f",($p_color->{red} / 255));
       my $blue=sprintf("%.5f",($p_color->{blue} / 255));
       my $green=sprintf("%.5f",($p_color->{green} / 255));
-      $teamsData{$nextTeam}= { AllyTeam => $allyTeam,
+      $teamsData{$nextTeam}= { AllyTeam => $allyTeamsMap{$p_battleStatus->{team}},
                                RgbColor => "$red $green $blue",
                                Side => $p_sides->[$p_battleStatus->{side}],
                                Handicap => $p_battleStatus->{bonus} };

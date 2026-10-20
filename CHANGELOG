@@ -108,3 +108,4 @@ SpringLobbyInterface.pm:
       fix typo in a debug message
 0.56: the return value of the inconsistencyHandler function is now used to determine whether callbacks must be skipped when inconsistent commands are received from lobby server
 0.57: correctly handle cases where lobby command callbacks remove themselves or other callbacks on same lobby command
+0.58: preserve lobby ally team order when numbering ally teams in start scripts (previously the ally team of the lowest ID player was always numbered first)
