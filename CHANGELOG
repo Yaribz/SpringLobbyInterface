@@ -108,3 +108,8 @@ SpringLobbyInterface.pm:
       fix typo in a debug message
 0.56: the return value of the inconsistencyHandler function is now used to determine whether callbacks must be skipped when inconsistent commands are received from lobby server
 0.57: correctly handle cases where lobby command callbacks remove themselves or other callbacks on same lobby command
+0.58: improve engine start script generation by using new "SpringStartScript" module
+      preserve allyteam and team IDs as much as possible when generating start script (as some modoptions may rely on them)
+      fix ordering of players sharing IDs when generating start script (make it deterministic)
+      pevent generating invalid start script when plugins provide data that can't be serialized with TDF
+      explicitely enable Perl warnings

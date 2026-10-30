@@ -18,10 +18,11 @@ Dependencies
 The SpringLobbyInterface module depends on following project:
 * [SimpleLog](https://github.com/Yaribz/SimpleLog)
 * [SpringLobbyProtocol](https://github.com/Yaribz/SpringLobbyProtocol)
+* [SpringStartScript](https://github.com/Yaribz/SpringStartScript)
 
 Licensing
 ---------
-Please see the file called [LICENSE](LICENSE).
+Please refer to the [LICENSE](LICENSE) file.
 
 Author
 ------

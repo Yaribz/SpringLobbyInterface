@@ -20,6 +20,7 @@
 package SpringLobbyInterface;
 
 use strict;
+use warnings;
 
 use Digest::MD5 "md5_base64";
 use IO::Select;
@@ -30,10 +31,11 @@ use Storable "dclone";
 
 use SimpleLog;
 use SpringLobbyProtocol;
+use SpringStartScript 'serializeSpringStartScript';
 
 # Internal data ###############################################################
 
-my $moduleVersion='0.57';
+my $moduleVersion='0.58';
 
 use constant { PROTOCOL_EXTENSIONS_PREFIX => '@PROTOCOL_EXTENSIONS@ ' };
 use constant { PROTOCOL_EXTENSIONS_PREFIX_LENGTH => length(PROTOCOL_EXTENSIONS_PREFIX) };
@@ -227,7 +229,7 @@ sub unmarshallCommand {
   return $r_cmd;
 }
 
-# Helper ######################################################################
+# Helper functions#############################################################
 
 sub aindex (\@$;$) {
   my ($aref, $val, $pos) = @_;
@@ -236,6 +238,37 @@ sub aindex (\@$;$) {
   }
   return -1;
 }
+
+sub playerSort {
+  my ($r_bData,$playerA,$playerB)=@_;
+  my ($idA,$idB) = map {$r_bData->{users}{$_}{battleStatus}{id}} ($playerA,$playerB);
+  return
+      $idA <=> $idB
+      || specSort($r_bData,$playerA,$playerB);
+}
+
+sub specSort {
+  my ($r_bData,$playerA,$playerB)=@_;
+  my ($lcPlayerA,$lcPlayerB) = map {lc} ($playerA,$playerB);
+  my ($skillA,$skillB) = map {getSkillValue($r_bData->{scriptTags}{"game/players/$_/skill"} // 0)} ($lcPlayerA,$lcPlayerB);
+  my ($skillSigmaA,$skillSigmaB) = map {$r_bData->{scriptTags}{"game/players/$_/skilluncertainty"} // 10} ($lcPlayerA,$lcPlayerB);
+  return
+      $skillB <=> $skillA
+      || $skillSigmaA <=> $skillSigmaB
+      || $playerA cmp $playerB;
+}
+
+sub aiBotSort {
+  my ($r_bData,$aiBotA,$aiBotB)=@_;
+  my ($idA,$idB) = map {$r_bData->{bots}{$_}{battleStatus}{id}} ($aiBotA,$aiBotB);
+  return
+      $idA <=> $idB
+      || $aiBotA cmp $aiBotB;
+}
+
+sub getSkillValue { shift() =~ /(\d+(?:\.\d+)?)/ ? $1 : 0 }
+
+sub colorStrucToRgb { my $r_color=shift; join(' ',map {sprintf('%.5f',$r_color->{$_}/255)} (qw'red green blue')) }
 
 # Business functions ##########################################################
 
@@ -262,368 +295,276 @@ sub storeRunningBattle {
   }
 }
 
-sub getSkillValue {
-  my $skillString=shift;
-  return $1 if($skillString =~ /(\d+(?:\.\d+)?)/);
-  return 0;
-}
-
-sub specSort {
-  my ($p_bData,$a,$b)=@_;
-  my ($skillA,$skillB,$skillSigmaA,$skillSigmaB)=(0,0,10,10);
-  if(exists $p_bData->{scriptTags}{'game/players/'.lc($a).'/skill'}) {
-    $skillA=getSkillValue($p_bData->{scriptTags}{'game/players/'.lc($a).'/skill'});
-    if(exists $p_bData->{scriptTags}{'game/players/'.lc($a).'/skilluncertainty'}) {
-      $skillSigmaA=$p_bData->{scriptTags}{'game/players/'.lc($a).'/skilluncertainty'};
-    }
-  }
-  if(exists $p_bData->{scriptTags}{'game/players/'.lc($b).'/skill'}) {
-    $skillB=getSkillValue($p_bData->{scriptTags}{'game/players/'.lc($b).'/skill'});
-    if(exists $p_bData->{scriptTags}{'game/players/'.lc($b).'/skilluncertainty'}) {
-      $skillSigmaB=$p_bData->{scriptTags}{'game/players/'.lc($b).'/skilluncertainty'};
-    }
-  }
-  return $skillB <=> $skillA if($skillA != $skillB);
-  return $skillSigmaA <=> $skillSigmaB;
-}
-
-# TODO: refactor this horrible function
+# autoHostMode: 0=client, 1=dedicated, 2=headless
 sub generateStartData {
-  my ($self,$p_additionalData,$p_sides,$p_battleData,$autoHostMode)=@_;
-  $autoHostMode=1 unless(defined $autoHostMode);
+  my ($self,$r_additionalData,$r_factions,$r_battleData,$autoHostMode)=@_;
+  $r_additionalData//={};
+  $autoHostMode//=1;
+
   my $sl=$self->{conf}{simpleLog};
-  $p_additionalData={} unless(defined $p_additionalData);
-  if(! (defined $p_battleData)) {
+
+  if(! (defined $r_battleData)) {
     if(! %{$self->{runningBattle}}) {
       if(exists $self->{battle}{battleId}) {
         $self->storeRunningBattle();
       }else{
-        $sl->log("Unable to generate start data (no battle data)",1);
+        $sl->log('Unable to generate start data (no battle data)',1);
         return (undef,undef,undef);
       }
     }
-    $p_battleData=$self->getRunningBattle();
+    $r_battleData=$self->getRunningBattle();
   }
-  my %battleData=%{$p_battleData};
-  if(! %battleData) {
-    $sl->log("Unable to generate start data (no battle data)",1);
+  if(! %{$r_battleData}) {
+    $sl->log('Unable to generate start data (no battle data)',1);
     return (undef,undef,undef);
   }
+  my $myPlayerName=$self->{login};
+  my $r_battleScriptTags=$r_battleData->{scriptTags};
   
-  my $myPlayerNum=0;
+  my (@players,@aiBots,@teams,@allyTeams,%teamsRemap,%allyTeamsRemap);
+  {
+    my ($r_battleUsers,$r_battleAiBots,$r_battleStartRects)=@{$r_battleData}{qw'users bots startRects'};
 
-  my $nextTeam=0;
-  my %teamsMap;
-  my %teamsData;
-
-  my $nextAllyTeam=0;
-  my %allyTeamsMap;
-  my %allyTeamsData;
-
-  shift(@{$battleData{userList}}) if($autoHostMode == 1 && $battleData{userList}->[0] eq $self->{login});
-
-  my (@playerList,@specList);
-  foreach my $user (@{$battleData{userList}}) {
-    if(defined $battleData{users}{$user}{battleStatus} && $battleData{users}{$user}{battleStatus}{mode}) {
-      push(@playerList,$user);
-    }else{
-      push(@specList,$user);
-    }
-  }
-  my @orderedPlayers = sort { $battleData{users}{$a}{battleStatus}{id} <=> $battleData{users}{$b}{battleStatus}{id} } @playerList;
-  my @orderedSpecs = sort { specSort(\%battleData,$a,$b) } @specList;
-  $battleData{userList}=[@orderedPlayers,@orderedSpecs];
-
-  my @orderedBots = sort { $battleData{bots}{$a}{battleStatus}{id} <=> $battleData{bots}{$b}{battleStatus}{id} } @{$battleData{botList}};
-  $battleData{botList}=\@orderedBots;
-
-  for my $userIndex (0..$#{$battleData{userList}}) {
-    my $user=$battleData{userList}->[$userIndex];
-    $myPlayerNum=$userIndex if($user eq $self->{login});
-    my $p_battleStatus=$battleData{users}{$user}{battleStatus};
-    if(defined $p_battleStatus && $p_battleStatus->{mode}) {
-      if($p_battleStatus->{side} > $#{$p_sides}) {
-        $sl->log("Side number of player \"$user\" is too big ($p_battleStatus->{side}), using max value for current MOD instead ($#{$p_sides})",2);
-        $p_battleStatus->{side}=$#{$p_sides};
-      }
-      if(! exists $teamsMap{$p_battleStatus->{id}}) {
-        my $allyTeam;
-        if(! exists $allyTeamsMap{$p_battleStatus->{team}}) {
-          $allyTeam=$nextAllyTeam++;
-          $allyTeamsMap{$p_battleStatus->{team}}=$allyTeam;
+    # Build sorted user and AI bot lists, and team and allyteam remapping
+    my (@userList,@aiBotList);
+    {
+      # Build user lists
+      my (@playerList,@specList);
+      foreach my $user (keys %{$r_battleUsers}) {
+        next if($autoHostMode == 1 && $user eq $myPlayerName);
+        my $r_battleStatus=$r_battleUsers->{$user}{battleStatus};
+        if(defined $r_battleStatus && $r_battleStatus->{mode}) {
+          push(@playerList,$user);
         }else{
-          $allyTeam=$allyTeamsMap{$p_battleStatus->{team}};
+          push(@specList,$user);
         }
-        my $p_color = $battleData{users}{$user}{color};
-        my $red=sprintf("%.5f",($p_color->{red} / 255));
-        my $blue=sprintf("%.5f",($p_color->{blue} / 255));
-        my $green=sprintf("%.5f",($p_color->{green} / 255));
-        $teamsData{$nextTeam}= { TeamLeader => $userIndex,
-                                 AllyTeam => $allyTeam,
-                                 RgbColor => "$red $green $blue",
-                                 Side => $p_sides->[$p_battleStatus->{side}],
-                                 Handicap => $p_battleStatus->{bonus} };
-        $teamsMap{$p_battleStatus->{id}}=$nextTeam++;
+      }
+
+      # Sort user lists
+      @playerList = sort { playerSort($r_battleData,$a,$b) } @playerList;
+      @specList = sort { specSort($r_battleData,$a,$b) } @specList;
+      @userList=(@playerList,@specList);
+
+      # Build sorted AI bot list
+      @aiBotList = sort { aiBotSort($r_battleData,$a,$b) } (keys %{$r_battleAiBots});
+
+      # Build team and allyteam remapping
+      { 
+        # Build team-to-allyteam mapping (using sorted players and AI bots lists to resolve conflicts in a deterministic way)
+        my %teamToAllyTeam;
+        $teamToAllyTeam{$r_battleUsers->{$_}{battleStatus}{id}}//=$r_battleUsers->{$_}{battleStatus}{team}
+            foreach(@playerList);
+        $teamToAllyTeam{$r_battleAiBots->{$_}{battleStatus}{id}}//=$r_battleAiBots->{$_}{battleStatus}{team}
+            foreach(@aiBotList);
+
+        # Build team remapping
+        {
+          my $idx=0;
+          $teamsRemap{$_}=$idx++
+              foreach(sort {$a <=> $b} (keys %teamToAllyTeam));
+        }
+
+        # Build allyteam remapping
+        {
+          my %usedAllyTeams = map {$_ => 1} (values %teamToAllyTeam,keys %{$r_battleStartRects});
+          my $idx=0;
+          $allyTeamsRemap{$_}=$idx++
+              foreach(sort {$a <=> $b} (keys %usedAllyTeams));
+        }
       }
     }
-  }
 
-  for my $botIndex (0..$#{$battleData{botList}}) {
-    my $bot=$battleData{botList}->[$botIndex];
-    my $p_battleStatus=$battleData{bots}{$bot}{battleStatus};
-    if($p_battleStatus->{side} > $#{$p_sides}) {
-      $sl->log("Side number of bot \"$bot\" is too big ($p_battleStatus->{side}), using max value for current MOD instead ($#{$p_sides})",2);
-      $p_battleStatus->{side}=$#{$p_sides};
-    }
-    if(! exists $teamsMap{$p_battleStatus->{id}}) {
-      my $allyTeam;
-      if(! exists $allyTeamsMap{$p_battleStatus->{team}}) {
-        $allyTeam=$nextAllyTeam++;
-        $allyTeamsMap{$p_battleStatus->{team}}=$allyTeam;
+    # Build players data and teams data for teams containing at least one human player
+    # (using sorted players list to resolve conflicts in a deterministic way)
+    for my $playerIdx (0..$#userList) {
+      my $player=$userList[$playerIdx];
+      my $r_battlePlayer=$r_battleUsers->{$player};
+      my $r_battleStatus=$r_battlePlayer->{battleStatus};
+      my $playerTeam =  defined $r_battleStatus && $r_battleStatus->{mode} ? $teamsRemap{$r_battleStatus->{id}} : undef;
+      my %playerData=(Name => $player);
+      $playerData{Password}=$r_battlePlayer->{scriptPass}
+          if(defined $r_battlePlayer->{scriptPass});
+      if(defined $playerTeam) {
+        $playerData{Spectator}=0;
+        $playerData{Team}=$playerTeam;
       }else{
-        $allyTeam=$allyTeamsMap{$p_battleStatus->{team}};
+        $playerData{Spectator}=1;
       }
-      my $p_color = $battleData{bots}{$bot}{color};
-      my $red=sprintf("%.5f",($p_color->{red} / 255));
-      my $blue=sprintf("%.5f",($p_color->{blue} / 255));
-      my $green=sprintf("%.5f",($p_color->{green} / 255));
-      $teamsData{$nextTeam}= { AllyTeam => $allyTeam,
-                               RgbColor => "$red $green $blue",
-                               Side => $p_sides->[$p_battleStatus->{side}],
-                               Handicap => $p_battleStatus->{bonus} };
-      $teamsMap{$p_battleStatus->{id}}=$nextTeam++;
-    }
-    my $team=$teamsMap{$p_battleStatus->{id}};
-    $teamsData{$team}{TeamLeader}=aindex(@{$battleData{userList}},$battleData{bots}{$bot}{owner});
-  }
-  
-  foreach my $allyTeam (keys %allyTeamsMap) {
-    my $realAllyTeam = $allyTeamsMap{$allyTeam};
-    if(exists $battleData{startRects}{$allyTeam}) {
-      $allyTeamsData{$realAllyTeam}= { StartRectTop => $battleData{startRects}{$allyTeam}{top}/200,
-                                       StartRectLeft => $battleData{startRects}{$allyTeam}{left}/200,
-                                       StartRectBottom => $battleData{startRects}{$allyTeam}{bottom}/200,
-                                       StartRectRight => $battleData{startRects}{$allyTeam}{right}/200 };
-    }else{
-      $allyTeamsData{$realAllyTeam}= {};
-    }
-  }
-
-  foreach my $allyTeam (sort keys %{$battleData{startRects}}) {
-    next if(exists $allyTeamsMap{$allyTeam});
-    $allyTeamsData{$nextAllyTeam++}= { StartRectTop => $battleData{startRects}{$allyTeam}{top}/200,
-                                       StartRectLeft => $battleData{startRects}{$allyTeam}{left}/200,
-                                       StartRectBottom => $battleData{startRects}{$allyTeam}{bottom}/200,
-                                       StartRectRight => $battleData{startRects}{$allyTeam}{right}/200 };
-  }
-
-  my @startData=("[GAME]","{");
-  push(@startData,"  Mapname=$battleData{map};");
-  push(@startData,"  Gametype=$battleData{mod};");
-  push(@startData,"");
-  foreach my $tag (keys %{$battleData{scriptTags}}) {
-    my $realTag=$tag;
-    if($tag =~ /^game\/([^\/]*)$/i) {
-      $realTag=$1;
-    }else{
-      next;
-    }
-    push(@startData,"  $realTag=$battleData{scriptTags}{$tag};");
-  }
-  push(@startData,"");
-  foreach my $tag (keys %{$p_additionalData}) {
-    my $realTag=$tag;
-    if($tag =~ /^game\/([^\/]+)$/i) {
-      $realTag=$1;
-    }else{
-      next;
-    }
-    push(@startData,"  $realTag=$p_additionalData->{$tag};");
-  }
-  push(@startData,"");
-  push(@startData,"  HostIP=$battleData{ip};") if($battleData{founder} ne $self->{login});
-  push(@startData,"  HostPort=$battleData{port};");
-  push(@startData,"");
-  if($autoHostMode) {
-    push(@startData,"  AutoHostName=$self->{login};");
-    push(@startData,"  AutoHostCountryCode=$self->{users}{$self->{login}}{country};");
-    push(@startData,"  AutoHostRank=$self->{users}{$self->{login}}{status}{rank};");
-    push(@startData,"  AutoHostAccountId=$self->{users}{$self->{login}}{accountId};");
-    push(@startData,"");
-  }
-  if($autoHostMode != 1) {
-    push(@startData,"  MyPlayerName=$self->{login};");
-    push(@startData,"  MyPlayerNum=$myPlayerNum;");
-  }
-  if($battleData{founder} eq $self->{login}) {
-    push(@startData,"  IsHost=1;");
-  }else{
-    push(@startData,"  IsHost=0;");
-  }
-  push(@startData,"");
-  push(@startData,"  NumPlayers=".($#{$battleData{userList}}+1).";");
-  push(@startData,"  NumTeams=$nextTeam;");
-  push(@startData,"  NumAllyTeams=$nextAllyTeam;");
-  push(@startData,"");
-
-  for my $userIndex (0..$#{$battleData{userList}}) {
-    my $user=$battleData{userList}->[$userIndex];
-    my $p_battleStatus=$battleData{users}{$user}{battleStatus}//{mode => 0};
-    push(@startData,"  [PLAYER$userIndex]");
-    push(@startData,"  {");
-    push(@startData,"    Name=$user;");
-    push(@startData,"    Password=$battleData{users}{$user}{scriptPass};") if(defined $battleData{users}{$user}{scriptPass});
-    push(@startData,"    Spectator=".(1 - $p_battleStatus->{mode}).";");
-    push(@startData,"    Team=$teamsMap{$p_battleStatus->{id}};") if($p_battleStatus->{mode});
-    if(exists $self->{users}{$user}) {
-      my $playerAccountId=$self->{users}{$user}{accountId};
-      push(@startData,"    CountryCode=$self->{users}{$user}{country};");
-      push(@startData,"    Rank=$self->{users}{$user}{status}{rank};");
-      push(@startData,"    AccountId=$playerAccountId;");
-      if(exists $p_additionalData->{playerData} && exists $p_additionalData->{playerData}{$playerAccountId}) {
-        foreach my $tag (keys %{$p_additionalData->{playerData}{$playerAccountId}}) {
-          if(ref $p_additionalData->{playerData}{$playerAccountId}{$tag} eq 'HASH') {
-            push(@startData,"    [$tag]");
-            push(@startData,"    {");
-            foreach my $subTag (keys %{$p_additionalData->{playerData}{$playerAccountId}{$tag}}) {
-              push(@startData,"      $subTag=$p_additionalData->{playerData}{$playerAccountId}{$tag}{$subTag};")
-            }
-            push(@startData,"    }");
-          }else{
-            push(@startData,"    $tag=$p_additionalData->{playerData}{$playerAccountId}{$tag};")
-          }
+      if(exists $self->{users}{$player}) {
+        my $r_playerLobbyData=$self->{users}{$player};
+        my $playerAccountId=$r_playerLobbyData->{accountId};
+        $playerData{CountryCode}=$r_playerLobbyData->{country};
+        $playerData{Rank}=$r_playerLobbyData->{status}{rank};
+        $playerData{AccountId}=$playerAccountId;
+        if(exists $r_additionalData->{playerData} && exists $r_additionalData->{playerData}{$playerAccountId}) {
+          my $r_playerAdditionalData=$r_additionalData->{playerData}{$playerAccountId};
+          $playerData{$_}=$r_playerAdditionalData->{$_}
+              foreach(keys %{$r_playerAdditionalData});
         }
       }
+      my $lcPlayer=lc($player);
+      my ($playerSkill,$playerSkillUncertainty) = map {$r_battleScriptTags->{"game/players/$lcPlayer/$_"}} (qw'skill skilluncertainty');
+      $playerData{Skill}=$playerSkill
+          if(defined $playerSkill);
+      $playerData{SkillUncertainty}=$playerSkillUncertainty
+          if(defined $playerSkillUncertainty);
+      push(@players,\%playerData);
+      next unless(defined $playerTeam && ! defined $teams[$playerTeam]);
+      my $faction=$r_battleStatus->{side};
+      if($faction > $#{$r_factions}) {
+        $sl->log("Faction number for player \"$player\" ($faction) is too large for current game (max faction number: $#{$r_factions}), using default faction instead ($r_factions->[0])",2);
+        $faction=$r_factions->[0];
+      }else{
+        $faction=$r_factions->[$faction];
+      }
+      $teams[$playerTeam]={
+        TeamLeader => $playerIdx,
+        AllyTeam => $allyTeamsRemap{$r_battleStatus->{team}},
+        RgbColor => colorStrucToRgb($r_battlePlayer->{color}),
+        Side => $faction,
+        Handicap => $r_battleStatus->{bonus},
+      };
     }
-    push(@startData,'    Skill='.$battleData{scriptTags}{'game/players/'.lc($user).'/skill'}.';') if(exists $battleData{scriptTags}{'game/players/'.lc($user).'/skill'});
-    push(@startData,'    SkillUncertainty='.$battleData{scriptTags}{'game/players/'.lc($user).'/skilluncertainty'}.';') if(exists $battleData{scriptTags}{'game/players/'.lc($user).'/skilluncertainty'});
-    push(@startData,"  }");
+
+    # Build AI bots data and teams data for teams containing only AI bots
+    # (using sorted AI bots list to resolve conflicts in a deterministic way)
+    foreach my $aiBot (@aiBotList) {
+      my $r_battleAiBot=$r_battleAiBots->{$aiBot};
+      my $r_battleStatus=$r_battleAiBot->{battleStatus};
+      my $aiBotTeam = $teamsRemap{$r_battleStatus->{id}};
+      my $aiShortName=$r_battleAiBot->{aiDll};
+      my $aiVersion;
+      ($aiShortName,$aiVersion)=($1,$2)
+          if($aiShortName =~ /^([^\|]+)\|(.+)$/);
+      my $aiBotHost=aindex(@userList,$r_battleAiBot->{owner});
+      my %aiBotData=(
+        Name => $aiBot,
+        ShortName => $aiShortName,
+        Team => $aiBotTeam,
+        Host => $aiBotHost,
+          );
+      $aiBotData{Version}=$aiVersion
+          if(defined $aiVersion);
+      if(exists $r_additionalData->{aiData} && exists $r_additionalData->{aiData}{$aiBot}) {
+        my $r_aiBotAdditionalData=$r_additionalData->{aiData}{$aiBot};
+        $aiBotData{$_}=$r_aiBotAdditionalData->{$_}
+            foreach(keys %{$r_aiBotAdditionalData});
+      }
+      push(@aiBots,\%aiBotData);
+      next if(defined $teams[$aiBotTeam]);
+      my $faction=$r_battleStatus->{side};
+      if($faction > $#{$r_factions}) {
+        $sl->log("Faction number for AI bot \"$aiBot\" ($faction) is too large for current game (max faction number: $#{$r_factions}), using default faction instead ($r_factions->[0])",2);
+        $faction=$r_factions->[0];
+      }else{
+        $faction=$r_factions->[$faction];
+      }
+      $teams[$aiBotTeam]={
+        TeamLeader => $aiBotHost,
+        AllyTeam => $allyTeamsRemap{$r_battleStatus->{team}},
+        RgbColor => colorStrucToRgb($r_battleAiBot->{color}),
+        Side => $faction,
+        Handicap => $r_battleStatus->{bonus},
+      };
+    }
+
+    # Build allyteams data
+    foreach my $allyTeamNum (keys %allyTeamsRemap) {
+      my $r_startRectDef=$r_battleStartRects->{$allyTeamNum};
+      my %allyTeamData;
+      $allyTeamData{startRect}={map {$_ => $r_startRectDef->{$_}/200} (keys %{$r_startRectDef})}
+          if(defined $r_startRectDef);
+      $allyTeams[$allyTeamsRemap{$allyTeamNum}] = \%allyTeamData;
+    }
   }
-  for my $botIndex (0..$#{$battleData{botList}}) {
-    my $bot=$battleData{botList}->[$botIndex];
-    my $p_battleStatus=$battleData{bots}{$bot}{battleStatus};
-    my $team=$teamsMap{$p_battleStatus->{id}};
-    my $aiShortName=$battleData{bots}{$bot}{aiDll};
-    my $aiVersion;
-    ($aiShortName,$aiVersion)=($1,$2) if($aiShortName =~ /^([^\|]+)\|(.+)$/);
-    push(@startData,"  [AI$botIndex]");
-    push(@startData,"  {");
-    push(@startData,"    Name=$bot;");
-    push(@startData,"    ShortName=$aiShortName;");
-    push(@startData,"    Team=$team;");
-    push(@startData,"    Host=".aindex(@{$battleData{userList}},$battleData{bots}{$bot}{owner}).';');
-    push(@startData,"    Version=$aiVersion;") if(defined $aiVersion);
-    if(exists $p_additionalData->{aiData} && exists $p_additionalData->{aiData}{$bot}) {
-      foreach my $tag (keys %{$p_additionalData->{aiData}{$bot}}) {
-        if(ref $p_additionalData->{aiData}{$bot}{$tag} eq 'HASH') {
-          push(@startData,"    [$tag]");
-          push(@startData,"    {");
-          foreach my $subTag (keys %{$p_additionalData->{aiData}{$bot}{$tag}}) {
-            push(@startData,"      $subTag=$p_additionalData->{aiData}{$bot}{$tag}{$subTag};")
-          }
-          push(@startData,"    }");
-        }else{
-          push(@startData,"    $tag=$p_additionalData->{aiData}{$bot}{$tag};")
-        }
+
+  my (%gameTags,%modOptions,%mapOptions,%additionalSections);
+  {
+    my (%gameScriptTags,%modScriptTags,%mapScriptTags);
+    foreach my $tag (keys %{$r_battleScriptTags}) {
+      my $val=$r_battleScriptTags->{$tag};
+      if($tag =~ /^game\/([^\/]*)$/i) {
+        $gameScriptTags{$1}=$val;
+      }elsif($tag =~ /^game\/modoptions\/(.+)$/i) {
+        $modScriptTags{$1}=$val;
+      }elsif($tag =~ /^game\/mapoptions\/(.+)$/i) {
+        $mapScriptTags{$1}=$val;
       }
     }
-    push(@startData,"  }");
-  }
-
-  push(@startData,"");
-
-  for my $teamIndex (sort (keys %teamsData)) {
-    push(@startData,"  [TEAM$teamIndex]");
-    push(@startData,"  {");
-    foreach my $k (keys %{$teamsData{$teamIndex}}) {
-      push(@startData,"    $k=$teamsData{$teamIndex}{$k};");
-    }
-    push(@startData,"  }"); 
-  }
-
-  push(@startData,"");
-
-  for my $teamAllyIndex (sort (keys %allyTeamsData)) {
-    push(@startData,"  [ALLYTEAM$teamAllyIndex]");
-    push(@startData,"  {");
-    push(@startData,"    NumAllies=0;");
-    foreach my $k (keys %{$allyTeamsData{$teamAllyIndex}}) {
-      push(@startData,"    $k=$allyTeamsData{$teamAllyIndex}{$k};");
-    }
-    push(@startData,"  }"); 
-  }
-
-  push(@startData,"");
-
-  push(@startData,"  NumRestrictions=".(scalar keys %{$battleData{restrictedUnits}}).";");
-  push(@startData,"  [RESTRICT]");
-  push(@startData,"  {");
-  my $uIndex=0;
-  foreach my $restrictedUnit (keys %{$battleData{restrictedUnits}}) {
-    push(@startData,"    Unit$uIndex=$restrictedUnit;");
-    push(@startData,"    Limit$uIndex=$battleData{restrictedUnits}{$restrictedUnit};");
-    $uIndex++;
-  }
-  push(@startData,"  }");
-
-  push(@startData,"  [MODOPTIONS]");
-  push(@startData,"  {");
-  foreach my $tag (keys %{$battleData{scriptTags}}) {
-    my $realTag=$tag;
-    if($tag =~ /^game\/modoptions\/(.+)$/i) {
-      $realTag=$1;
-    }else{
-      next;
-    }
-    push(@startData,"    $realTag=$battleData{scriptTags}{$tag};");
-  }
-  foreach my $tag (keys %{$p_additionalData}) {
-    my $realTag=$tag;
-    if($tag =~ /^game\/modoptions\/(.+)$/i) {
-      $realTag=$1;
-    }else{
-      next;
-    }
-    push(@startData,"    $realTag=$p_additionalData->{$tag};");
-  }
-  push(@startData,"  }");
-
-  push(@startData,"  [MAPOPTIONS]");
-  push(@startData,"  {");
-  foreach my $tag (keys %{$battleData{scriptTags}}) {
-    my $realTag=$tag;
-    if($tag =~ /^game\/mapoptions\/(.+)$/i) {
-      $realTag=$1;
-    }else{
-      next;
-    }
-    push(@startData,"    $realTag=$battleData{scriptTags}{$tag};");
-  }
-  foreach my $tag (keys %{$p_additionalData}) {
-    my $realTag=$tag;
-    if($tag =~ /^game\/mapoptions\/(.+)$/i) {
-      $realTag=$1;
-    }else{
-      next;
-    }
-    push(@startData,"    $realTag=$p_additionalData->{$tag};");
-  }
-  push(@startData,"  }");
-
-  foreach my $tag (sort keys %{$p_additionalData}) {
-    next if(any {$tag eq $_} (qw'playerData aiData'));
-    if(ref $p_additionalData->{$tag} eq 'HASH') {
-      push(@startData,"  [$tag]");
-      push(@startData,"  {");
-      foreach my $subTag (sort keys %{$p_additionalData->{$tag}}) {
-        push(@startData,"    $subTag=$p_additionalData->{$tag}{$subTag};")
+    my (%additionalGameTags,%additionalModTags,%additionalMapTags);
+    foreach my $tag (keys %{$r_additionalData}) {
+      next if(any {$tag eq $_} (qw'playerData aiData'));
+      my $val=$r_additionalData->{$tag};
+      if($tag =~ /^game\/([^\/]*)$/i) {
+        $additionalGameTags{$1}=$val;
+      }elsif($tag =~ /^game\/modoptions\/(.+)$/i) {
+        $additionalModTags{$1}=$val;
+      }elsif($tag =~ /^game\/mapoptions\/(.+)$/i) {
+        $additionalMapTags{$1}=$val;
+      }elsif(ref $val eq 'HASH') {
+        $additionalSections{$tag}=$val;
       }
-      push(@startData,"  }");
+    }
+    foreach my $gameScriptTag (keys %gameScriptTags) {
+      next if(exists $additionalGameTags{$gameScriptTag});
+      $gameTags{$gameScriptTag}=$gameScriptTags{$gameScriptTag};
+    }
+    foreach my $gameTag (keys %additionalGameTags) {
+      next unless(defined $additionalGameTags{$gameTag});
+      $gameTags{$gameTag}=$additionalGameTags{$gameTag};
+    }
+    foreach my $modScriptTag (keys %modScriptTags) {
+      next if(exists $additionalModTags{$modScriptTag});
+      $modOptions{$modScriptTag}=$modScriptTags{$modScriptTag};
+    }
+    foreach my $modTag (keys %additionalModTags) {
+      next unless(defined $additionalModTags{$modTag});
+      $modOptions{$modTag}=$additionalModTags{$modTag};
+    }
+    foreach my $mapScriptTag (keys %mapScriptTags) {
+      next if(exists $additionalMapTags{$mapScriptTag});
+      $mapOptions{$mapScriptTag}=$mapScriptTags{$mapScriptTag};
+    }
+    foreach my $mapTag (keys %additionalMapTags) {
+      next unless(defined $additionalMapTags{$mapTag});
+      $mapOptions{$mapTag}=$additionalMapTags{$mapTag};
     }
   }
-  push(@startData,"}");
 
-  return (\@startData,\%teamsMap,\%allyTeamsMap);
+  my $r_lobbyAutoHostData=$self->{users}{$myPlayerName};
+  my $isHost = $r_battleData->{founder} eq $myPlayerName ? 1 : 0;
+  my %gameData=(
+    MapName => $r_battleData->{map},
+    GameType => $r_battleData->{mod},
+    $isHost ? () : (HostIP => $r_battleData->{ip}),
+    HostPort => $r_battleData->{port},
+    $autoHostMode ? (
+      AutohostName => $myPlayerName,
+      AutohostCountryCode => $r_lobbyAutoHostData->{country},
+      AutohostRank => $r_lobbyAutoHostData->{status}{rank},
+      AutohostAccountId => $r_lobbyAutoHostData->{accountId},
+    ) : (),
+    $autoHostMode == 1 ? () : (MyPlayerName => $myPlayerName),
+    IsHost => $isHost,
+    %gameTags,
+    players => \@players,
+    ais => \@aiBots,
+    teams => \@teams,
+    allyTeams => \@allyTeams,
+    unitRestrictions => $r_battleData->{restrictedUnits},
+    MODOPTIONS => \%modOptions,
+    MAPOPTIONS => \%mapOptions,
+    %additionalSections,
+      );
+
+  my ($startScript,$encodeError);
+  eval {$startScript=serializeSpringStartScript(\%gameData,1);1}
+      or do { $encodeError=$@; chomp($encodeError) };
+  if(defined $encodeError) {
+    $sl->log("Unable to generate start data ($encodeError)",1);
+    return (undef,undef,undef);
+  }
+  return ($startScript,\%teamsRemap,\%allyTeamsRemap);
 }
 
 sub addCallbacks {
